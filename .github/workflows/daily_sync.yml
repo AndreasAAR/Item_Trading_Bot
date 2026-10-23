@@ -1,0 +1,68 @@
+name: Daily Tradera Multi-Platform Sync
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Runs daily at 08:00 UTC (10:00 Swedish time)
+  workflow_dispatch:     # Enables manual 1-click execution in GitHub UI
+
+jobs:
+  sync:
+    name: Sync Tradera to Blocket & Facebook Marketplace
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Browsers
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Restore Auth Session States
+        env:
+          BLOCKET_AUTH_STATE: ${{ secrets.BLOCKET_AUTH_STATE }}
+          FB_AUTH_STATE: ${{ secrets.FB_AUTH_STATE }}
+        run: |
+          mkdir -p data
+          if [ -n "$BLOCKET_AUTH_STATE" ]; then
+            echo "$BLOCKET_AUTH_STATE" > data/blocket_auth_state.json
+            echo "Restored Blocket session state."
+          else
+            echo "Warning: BLOCKET_AUTH_STATE secret is not set."
+          fi
+
+          if [ -n "$FB_AUTH_STATE" ]; then
+            echo "$FB_AUTH_STATE" > data/fb_auth_state.json
+            echo "Restored Facebook session state."
+          else
+            echo "Warning: FB_AUTH_STATE secret is not set."
+          fi
+
+      - name: Run Multi-Platform Sync Pipeline
+        run: |
+          python -u -m src.cli sync --target all --headless
+
+      - name: Persist Database Updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@github.com"
+          git add data/sync_store.db
+          if git diff --staged --quiet; then
+            echo "No database changes to commit."
+          else
+            git commit -m "chore: auto-sync database update [skip ci]"
+            git push
+          fi
