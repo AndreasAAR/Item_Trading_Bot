@@ -12,6 +12,7 @@ venv/
 # Local data & credentials
 data/*
 !data/.gitkeep
+!data/sync_store.db
 .env
 *.log
 
