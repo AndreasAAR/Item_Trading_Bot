@@ -1,79 +1,145 @@
-# Item Trading Bot (Tradera -> Blocket Sync)
+# Multi-Channel E-Commerce Inventory Synchronizer
+### Automated Cross-Listing Engine: Tradera ➔ Blocket.se & Facebook Marketplace
 
-An automated cross-listing utility designed to fetch active articles from **Tradera** ([ODENPLAN SALES](https://www.tradera.com/profile/items/2195678/odenplan-sales)) and draft matching listings on **Blocket.se**.
+[![Daily Sync Workflow](https://github.com/AndreasAAR/Item_Trading_Bot/actions/workflows/daily_sync.yml/badge.svg)](https://github.com/AndreasAAR/Item_Trading_Bot/actions/workflows/daily_sync.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Playwright](https://img.shields.io/badge/playwright-v1.40+-green.svg)](https://playwright.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
----
-
-## Features
-- **Tradera Scraper**: Automatically retrieves all active items, descriptions, attributes (size, brand, condition), and high-resolution images.
-- **Smart Pricing**: Translates Tradera Buy-Now ("Köp nu") prices to Blocket fixed prices with fallback to auction starting bids.
-- **SQLite Sync Database**: Tracks discovered, drafted, and published items to guarantee idempotency and avoid duplicates.
-- **Cloud Draft Engine**: Automatically populates Blocket ad forms with high-resolution photos and copy, and triggers cloud persistence to your account (**Mitt Blocket -> Mina annonser -> Utkast**) for instant acceptance in the Blocket mobile app.
-- **Interactive CLI**: Easy terminal commands to discover, inspect, and draft items.
+An enterprise-grade cross-listing utility that automatically synchronizes active inventory from **Tradera** ([ODENPLAN SALES](https://www.tradera.com/profile/items/2195678/odenplan-sales)) to **Blocket.se** and **Facebook Marketplace**. Built with intelligent taxonomy mapping, resilient headless browser automation, and scheduled execution across local and CI/CD environments.
 
 ---
 
-## Quickstart
+## 🏛️ System Architecture
+
+```mermaid
+flowchart TD
+    subgraph Sourcing ["1. Sourcing Layer"]
+        T["Tradera Active Listings"] -->|HTTP Scraping| P["Tradera HTML Parser"]
+        P -->|Raw Item Data| M["Dynamic Taxonomy & Attribute Mapper"]
+    end
+
+    subgraph StateMachine ["2. Idempotent State Engine"]
+        M -->|Normalized Articles| DB[("SQLite State Store (sync_store.db)")]
+        DB -->|Query Unsynced Items| ORCH["Sync Orchestrator"]
+    end
+
+    subgraph Automation ["3. Cross-Platform Automation"]
+        ORCH -->|Session Persistence| B_ENG["Blocket Engine (Playwright)"]
+        ORCH -->|Stealth Browser| FB_ENG["Facebook Engine (Playwright)"]
+
+        B_ENG -->|Cloud Draft Creation| B_DRAFT["Blocket 'Utkast' (1-Tap Mobile Publish)"]
+        FB_ENG -->|Automated Listing & Next ➔ Publish| FB_LIVE["Facebook Marketplace Active Listings"]
+    end
+
+    subgraph Schedulers ["4. Scheduled Execution"]
+        CRON_LOCAL["Windows Task Scheduler (Daily 09:00)"] -.->|Local Swedish IP| ORCH
+        GHA["GitHub Actions Cron"] -.->|Secrets & Headless Linux| ORCH
+    end
+```
+
+---
+
+## 🌟 Key Features
+
+- **Multi-Platform Cross-Listing**: Simultaneously synchronizes inventory across Tradera, Blocket.se, and Facebook Marketplace.
+- **Dynamic Taxonomy & Condition Mapping**: Translates Tradera categories and attributes into platform-specific taxonomies in both Swedish and English (e.g., Men's Clothing, Sporting Goods, Toys, Furniture).
+- **Stealth Browser Automation**: Bypasses bot-detection mechanisms (such as Arkose Labs MatchKey) using persistent browser sessions, `--disable-blink-features=AutomationControlled`, and randomized human-like pacing delays (15s).
+- **Idempotent SQLite State Machine**: Local database tracking ensures zero duplicate postings and tracks independent statuses (`discovered`, `drafted`, `published`) per platform.
+- **Blocket Cloud Draft Engine**: Injects images, structured descriptions, and attributes into Blocket cloud drafts (`Utkast`) for 1-tap mobile publishing.
+- **Dual Execution Modes**:
+  - **Local Windows Task Scheduler**: Runs silently daily at 09:00 AM using your native residential IP.
+  - **GitHub Actions CI/CD**: Fully automated headless pipeline with GitHub Secrets for authentication.
+
+---
+
+## 🚀 Quickstart
 
 ### 1. Requirements
 - Python 3.10+
-- Chrome / Chromium
+- Google Chrome / Chromium
 
-### 2. Install Dependencies
+### 2. Installation
 ```bash
+git clone https://github.com/AndreasAAR/Item_Trading_Bot.git
+cd Item_Trading_Bot
+
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 3. Usage
+### 3. Authentication (One-Time Setup)
 
-#### 🚀 One-Click Pipeline (Recommended)
-Automatically checks authentication, fetches newly posted items from Tradera, and batch-drafts all unsynced items directly into your Blocket cloud drafts:
+#### Blocket.se
 ```bash
-# Run full pipeline
-python -m src.cli sync
-
-# Or run in background (headless)
-python -m src.cli sync --headless
-
-# Or sync next 5 items
-python -m src.cli sync --limit 5
-```
-
-#### Granular Commands (Optional)
-```bash
-# 1. Discover Active Items on Tradera
-python -m src.cli fetch
-
-# 2. List Items & Sync Status
-python -m src.cli list
-
-# 3. Login to Blocket (One-time session save)
 python -m src.cli login
 ```
+*Opens an interactive browser window to log in via Schibsted/BankID once and saves the authenticated session state.*
 
-
-#### Draft Items to Blocket (Ready for Acceptance in Mobile App)
+#### Facebook Marketplace
 ```bash
-# Draft a specific item directly to your Blocket account
-python -m src.cli draft --item-id 756934350
+# Option A: Interactive Browser Login (Recommended)
+python -m src.cli fb-login
 
-# Draft next 5 items in batch to review in Blocket app
-python -m src.cli draft --limit 5
-
-# Draft all unsynced items
-python -m src.cli draft --all
-
-# Optional: Inspect in desktop browser before saving
-python -m src.cli draft --item-id 756934350 --pause
+# Option B: Instant Cookie Import
+python -m src.cli fb-login --c-user <YOUR_C_USER> --xs <YOUR_XS>
 ```
-
 
 ---
 
-## Documentation
-- [docs/goal.md](docs/goal.md) — Project vision, requirements, and constraints.
-- [docs/roadmap.md](docs/roadmap.md) — Phased delivery plan.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Subsystems, data pipelines, and execution flows.
-- [docs/CODEMAP.md](docs/CODEMAP.md) — Directory layout and code symbol index.
-- [docs/DECISIONS.md](docs/DECISIONS.md) — Architectural decision records (ADRs).
+## 💻 CLI Commands
+
+### Full Pipeline (One-Click Sync)
+Fetches newly posted items from Tradera, drafts unsynced items to Blocket, and publishes them to Facebook:
+```bash
+# Sync both platforms
+python -m src.cli sync --target all
+
+# Run headless in background
+python -m src.cli sync --target all --headless
+
+# Sync only Blocket or Facebook
+python -m src.cli sync --target blocket
+python -m src.cli sync --target facebook
+```
+
+### Granular Commands
+```bash
+# Inspect all tracked items and multi-platform sync status
+python -m src.cli list
+
+# Discover and refresh active items from Tradera
+python -m src.cli fetch
+
+# Batch draft to Blocket
+python -m src.cli draft --all --delay 10.0
+
+# Batch publish to Facebook Marketplace
+python -m src.cli fb-draft --all --publish --delay 15.0
+```
+
+---
+
+## ⏰ Automated Scheduling
+
+### Option 1: Local Windows Task (Zero Datacenter Flags)
+Registered to run silently every morning at 09:00 AM using your home IP:
+```powershell
+# Register the Windows Scheduled Task
+powershell -ExecutionPolicy Bypass -File scripts\setup_windows_task.ps1
+
+# Run on demand
+Start-ScheduledTask -TaskName 'TraderaMultiPlatformSync'
+```
+
+### Option 2: GitHub Actions (Cloud Automation)
+Runs on a daily schedule (`08:00 UTC`) via `.github/workflows/daily_sync.yml`:
+1. Add `BLOCKET_AUTH_STATE` to your GitHub Repository Secrets.
+2. Add `FB_AUTH_STATE` to your GitHub Repository Secrets.
+3. The workflow runs headlessly and commits database updates back to the repo.
+
+---
+
+## ⚠️ Disclaimer & Ethical Use
+
+> **Disclaimer**: This software is developed for educational purposes and personal inventory synchronization across platforms where the user maintains active seller accounts. It is designed to assist individuals in managing their own pre-owned goods across secondary marketplaces. Users are responsible for complying with the Terms of Service (ToS) and rate-limiting policies of all respective platforms.
