@@ -15,8 +15,10 @@ TRADERA_USER_ID = "2195678"
 TRADERA_ALIAS = "odenplan-sales"
 TRADERA_PROFILE_URL = f"https://www.tradera.com/profile/items/{TRADERA_USER_ID}/{TRADERA_ALIAS}"
 
+import os
+
 # Blocket configuration
-BLOCKET_USER_EMAIL = "andreas.ahrlund@gmail.com"
+BLOCKET_USER_EMAIL = os.environ.get("BLOCKET_USER_EMAIL", "")
 BLOCKET_BASE_URL = "https://www.blocket.se"
 BLOCKET_NEW_AD_URL = "https://www.blocket.se/create-item/start"
 

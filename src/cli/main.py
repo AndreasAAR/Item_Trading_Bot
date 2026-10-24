@@ -88,7 +88,7 @@ def cmd_list(args):
 def cmd_login(args=None):
     """Interactive login to Blocket to save session state."""
     session_mgr = BlocketSessionManager()
-    session_mgr.interactive_login(email="andreas.ahrlund@gmail.com")
+    session_mgr.interactive_login(email=getattr(args, "email", None))
 
 def cmd_fb_login(args=None):
     """Interactive login to Facebook Marketplace to save session state."""

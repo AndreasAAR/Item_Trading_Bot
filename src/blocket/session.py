@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
+from typing import Optional
 from playwright.sync_api import sync_playwright, BrowserContext
-from config.settings import BLOCKET_AUTH_STATE_PATH, BLOCKET_BASE_URL
+from config.settings import BLOCKET_AUTH_STATE_PATH, BLOCKET_BASE_URL, BLOCKET_USER_EMAIL
 
 class BlocketSessionManager:
     def __init__(self, state_path: Path = BLOCKET_AUTH_STATE_PATH):
@@ -10,9 +11,10 @@ class BlocketSessionManager:
     def has_saved_session(self) -> bool:
         return self.state_path.exists() and self.state_path.stat().st_size > 50
 
-    def interactive_login(self, email: str = "andreas.ahrlund@gmail.com") -> bool:
+    def interactive_login(self, email: Optional[str] = None) -> bool:
         """Opens a visible browser for the user to log in with Schibsted/BankID, then saves storage state."""
-        print(f"\nOpening browser to log into Blocket as {email}...")
+        target_email = email or BLOCKET_USER_EMAIL or "your-email@example.com"
+        print(f"\nOpening browser to log into Blocket (user: {target_email})...")
         print("Please complete the login in the browser window.")
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=False)
