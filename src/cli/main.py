@@ -25,6 +25,7 @@ def cmd_fetch(args=None):
 
     new_count = 0
     updated_count = 0
+    relisted_count = 0
 
     for idx, card in enumerate(cards, 1):
         try:
@@ -34,16 +35,27 @@ def cmd_fetch(args=None):
             if detail.starting_price is None and card.starting_price is not None:
                 detail.starting_price = card.starting_price
 
-            is_new = repo.upsert_item(detail)
-            if is_new:
+            outcome, matched_item, reason = repo.upsert_item_detailed(detail)
+            if outcome == "new":
                 new_count += 1
+            elif outcome == "relisted":
+                relisted_count += 1
+                old_id = matched_item["item_id"]
+                console.print(
+                    f"  [cyan]-> Relisted item recognized:[/cyan] '{detail.title}' "
+                    f"(ID #{old_id} -> #{detail.item_id}) [{reason}] - Preserved sync states."
+                )
             else:
                 updated_count += 1
         except Exception as e:
             console.print(f"[red]Error fetching {card.url}: {e}[/red]")
 
-    console.print(f"• Discovered: [bold]{new_count}[/bold] new, [bold]{updated_count}[/bold] refreshed.")
-    return new_count, updated_count
+    console.print(
+        f"• Discovered: [bold green]{new_count}[/bold green] new, "
+        f"[bold]{updated_count}[/bold] refreshed, "
+        f"[bold cyan]{relisted_count}[/bold cyan] relisted (deduplicated)."
+    )
+    return new_count, updated_count, relisted_count
 
 def cmd_list(args):
     """List tracked items and their sync status."""
@@ -313,7 +325,36 @@ def cmd_clean_drafts(args):
     with get_db(repo.db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE items SET status = 'discovered', blocket_ad_id = NULL, blocket_ad_url = NULL WHERE status = 'drafted'")
-    console.print(Panel(f"[bold green]Successfully deleted {count} drafts from Blocket and reset local database statuses to 'discovered'![/bold green]"))
+def cmd_dedupe(args):
+    """Scan database for duplicate listings and optionally merge them."""
+    console.print(Panel("[bold green]Scanning database for duplicate or relisted items...[/bold green]"))
+    repo = SyncRepository()
+    duplicates = repo.find_all_duplicates()
+
+    if not duplicates:
+        console.print("[bold green][OK] No duplicate items found in database! Inventory is clean.[/bold green]")
+        return
+
+    console.print(f"Found [bold yellow]{len(duplicates)}[/bold yellow] duplicate cluster(s):")
+    for cluster in duplicates:
+        p = cluster["primary_item"]
+        console.print(f"\n[bold white]Primary Item #{p['item_id']}:[/bold white] {p['title']}")
+        console.print(f"  Target Price: {p.get('target_price')} SEK | Blocket: [{p.get('status')}], Facebook: [{p.get('facebook_status')}]")
+        for dup in cluster["duplicate_items"]:
+            d = dup["item"]
+            reason = dup["reason"]
+            console.print(f"  [yellow]-> Duplicate #{d['item_id']}:[/yellow] {d['title']} ({reason})")
+            console.print(f"    Target Price: {d.get('target_price')} SEK | Blocket: [{d.get('status')}], Facebook: [{d.get('facebook_status')}]")
+
+            if getattr(args, "merge", False):
+                success = repo.merge_duplicate_items(p["item_id"], d["item_id"])
+                if success:
+                    console.print(f"    [bold green][OK] Merged duplicate #{d['item_id']} into #{p['item_id']}[/bold green]")
+                else:
+                    console.print(f"    [bold red][FAIL] Failed to merge #{d['item_id']}[/bold red]")
+
+    if not getattr(args, "merge", False):
+        console.print("\n[yellow]Tip: Run 'python -m src.cli dedupe --merge' to automatically merge duplicates and retain active platform statuses.[/yellow]")
 
 def main():
     parser = argparse.ArgumentParser(description="Tradera -> Blocket & Facebook Marketplace Item Trading Bot")
@@ -377,6 +418,10 @@ def main():
     p_price.add_argument("item_id", help="Item ID")
     p_price.add_argument("price", type=int, help="Target price in SEK")
 
+    # dedupe
+    p_dedupe = subparsers.add_parser("dedupe", help="Scan and optionally merge duplicate listings")
+    p_dedupe.add_argument("--merge", action="store_true", help="Automatically merge detected duplicates into primary listing")
+
     args = parser.parse_args()
 
     # Default to sync if no command provided
@@ -395,6 +440,7 @@ def main():
         "fb-draft": cmd_fb_draft,
         "clean-drafts": cmd_clean_drafts,
         "set-price": cmd_set_price,
+        "dedupe": cmd_dedupe,
     }
 
     commands[args.command](args)
