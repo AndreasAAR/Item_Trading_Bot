@@ -103,9 +103,10 @@ This document outlines the sequential phases of development, tracking current pr
 ---
 
 ## Phase 11: Bidirectional Sold Sync (Blocket & Facebook ➔ Tradera)
-- [ ] Create `TraderaSessionManager` and interactive login command (`tradera-login`).
-- [ ] Implement `BlocketSalesWatcher` to monitor `Avslutade` (Ended/Sold) tab on Blocket.
-- [ ] Implement `TraderaUnlister` to end listings early on Tradera when sold on external channels.
-- [ ] Wire bidirectional reconciliation into daily sync.
+- [x] Create `TraderaSessionManager` and interactive login command (`tradera-login`).
+- [x] Implement Blocket `Avslutade` sales detector (`get_ended_sold_titles()`).
+- [x] Implement `TraderaUnlister` (`src/tradera/unlister.py`) to end listings early on Tradera when sold on external channels.
+- [x] Wire bidirectional reconciliation (`reconcile_all()`) into `sync-sold` and daily sync.
+- [x] Comprehensive unit tests in `tests/test_unlister.py`.
 
 
