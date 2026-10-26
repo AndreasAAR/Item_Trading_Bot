@@ -79,4 +79,33 @@ This document outlines the sequential phases of development, tracking current pr
 - [x] CLI integration: `fb-login`, `fb-draft`, and multi-target `sync --target [blocket|facebook|all]`.
 - [x] Automated test suite for Facebook mapping and formatting (`tests/test_fb_mapper.py`).
 
+---
+
+## Phase 9: Relist Detection & Deduplication Engine
+- [x] Title normalization and tokenization (`src/storage/dedupe.py`).
+- [x] Fuzzy string similarity matching (>90% threshold) using `SequenceMatcher`.
+- [x] Image signature hashing for visual verification of relisted items.
+- [x] Auto-updating repository relist handler: preserves `drafted` and `published` platform statuses when items relist under new Tradera IDs.
+- [x] Duplicate clustering and CLI merge utility (`python -m src.cli dedupe [--merge]`).
+- [x] 18 unit tests in `tests/test_dedupe.py`.
+
+---
+
+## Phase 10: Multi-Channel Sold Reconciliation & Unlisting
+- [x] Tradera sold detection: distinguishes genuine sales (`såld med köp nu`, `vann auktionen`, `slutpris`) from expired auctions (`avslutades utan bud`).
+- [x] Blocket double-tab unlisting: checks both **Aktiva** (live listings) and **Utkast** (drafts).
+- [x] Safe active listing removal: uses 3-dots action menu (`...` -> `Ta bort` -> confirm modal) to bypass Blocket's conversation requirement.
+- [x] Facebook Marketplace unlisting (`src/facebook/unlister.py`).
+- [x] Full reconciliation pipeline (`src/reconciliation/sold_checker.py`).
+- [x] CLI integration: `python -m src.cli sync-sold [--dry-run]` and automatic daily sync execution.
+- [x] Automated unit tests in `tests/test_unlister.py`.
+
+---
+
+## Phase 11: Bidirectional Sold Sync (Blocket & Facebook ➔ Tradera)
+- [ ] Create `TraderaSessionManager` and interactive login command (`tradera-login`).
+- [ ] Implement `BlocketSalesWatcher` to monitor `Avslutade` (Ended/Sold) tab on Blocket.
+- [ ] Implement `TraderaUnlister` to end listings early on Tradera when sold on external channels.
+- [ ] Wire bidirectional reconciliation into daily sync.
+
 

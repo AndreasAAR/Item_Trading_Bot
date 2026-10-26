@@ -43,9 +43,11 @@ flowchart TD
 ## 🌟 Key Features
 
 - **Multi-Platform Cross-Listing**: Simultaneously synchronizes inventory across Tradera, Blocket.se, and Facebook Marketplace.
+- **Automated Sold Reconciliation & Unlisting**: Automatically detects items sold on Tradera (Buy Now or winning auction bidder) and unlists them from Blocket (both live **Aktiva** listings and **Utkast** drafts) and Facebook Marketplace.
+- **Deduplication & Relist Intelligence**: Uses title normalization, fuzzy string similarity (>90%), and image signature hashing to detect relisted items and merge duplicates while preserving platform sync statuses.
 - **Dynamic Taxonomy & Condition Mapping**: Translates Tradera categories and attributes into platform-specific taxonomies in both Swedish and English (e.g., Men's Clothing, Sporting Goods, Toys, Furniture).
 - **Stealth Browser Automation**: Bypasses bot-detection mechanisms (such as Arkose Labs MatchKey) using persistent browser sessions, `--disable-blink-features=AutomationControlled`, and randomized human-like pacing delays (15s).
-- **Idempotent SQLite State Machine**: Local database tracking ensures zero duplicate postings and tracks independent statuses (`discovered`, `drafted`, `published`) per platform.
+- **Idempotent SQLite State Machine**: Local database tracking ensures zero duplicate postings and tracks independent statuses (`discovered`, `drafted`, `published`, `sold`) per platform.
 - **Blocket Cloud Draft Engine**: Injects images, structured descriptions, and attributes into Blocket cloud drafts (`Utkast`) for 1-tap mobile publishing.
 - **Dual Execution Modes**:
   - **Local Windows Task Scheduler**: Runs silently daily at 09:00 AM using your native residential IP.
@@ -107,6 +109,14 @@ python -m src.cli sync --target facebook
 ```bash
 # Inspect all tracked items and multi-platform sync status
 python -m src.cli list
+
+# Detect sold items on Tradera and unlist from Blocket & Facebook
+python -m src.cli sync-sold
+python -m src.cli sync-sold --dry-run
+
+# Scan and merge duplicate or relisted items
+python -m src.cli dedupe
+python -m src.cli dedupe --merge
 
 # Discover and refresh active items from Tradera
 python -m src.cli fetch
