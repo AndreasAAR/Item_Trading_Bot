@@ -27,6 +27,87 @@ class TraderaSessionManager:
                 pass
         return False
 
+    def save_manual_cookies(self, trd_at: str, trd_rt: str = "") -> bool:
+        """Saves session directly from manual trd_at and optional trd_rt cookies."""
+        trd_at = trd_at.strip()
+        trd_rt = trd_rt.strip() if trd_rt else ""
+        if not trd_at:
+            print("[ERROR] 'trd_at' cookie/token is required.", flush=True)
+            return False
+
+        cookies = [
+            {
+                "name": "trd_at",
+                "value": trd_at,
+                "domain": ".tradera.com",
+                "path": "/",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ]
+        if trd_rt:
+            cookies.append({
+                "name": "trd_rt",
+                "value": trd_rt,
+                "domain": ".tradera.com",
+                "path": "/",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            })
+
+        state = {
+            "cookies": cookies,
+            "origins": [{"origin": "https://www.tradera.com", "localStorage": []}]
+        }
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        print(f"\n[SUCCESS] Tradera session cookies saved to {self.state_path}!", flush=True)
+        return True
+
+    def save_cookie_string(self, cookie_str: str) -> bool:
+        """Parses a raw Cookie header string from tradera.com and saves all Tradera cookies."""
+        import http.cookies
+        cookie_str = cookie_str.strip()
+        if not cookie_str:
+            print("[ERROR] Empty cookie string provided.", flush=True)
+            return False
+
+        cookies = []
+        # Support semicolon-separated cookies
+        parts = [p.strip() for p in cookie_str.split(";") if "=" in p]
+        for p in parts:
+            name, val = p.split("=", 1)
+            name = name.strip()
+            val = val.strip()
+            cookies.append({
+                "name": name,
+                "value": val,
+                "domain": ".tradera.com",
+                "path": "/",
+                "httpOnly": name in ("trd_at", "trd_rt"),
+                "secure": True,
+                "sameSite": "Lax",
+            })
+
+        if not cookies:
+            print("[ERROR] No cookies parsed from cookie string.", flush=True)
+            return False
+
+        state = {
+            "cookies": cookies,
+            "origins": [{"origin": "https://www.tradera.com", "localStorage": []}]
+        }
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        print(f"\n[SUCCESS] Saved {len(cookies)} Tradera cookies to {self.state_path}!", flush=True)
+        return True
+
     def get_context(self, p: Playwright, headless: bool = True) -> BrowserContext:
         """Returns a Playwright BrowserContext with Tradera credentials injected."""
         browser = p.chromium.launch(

@@ -141,3 +141,29 @@ class TestSoldReconciler:
         mock_session_mgr.has_saved_session.return_value = False
         unlister = TraderaUnlister(session_manager=mock_session_mgr)
         assert unlister.end_listing("http://tradera/1", "1") is False
+
+    def test_tradera_session_manager_cookies(self, tmp_path):
+        from src.tradera.session import TraderaSessionManager
+        import json
+
+        state_file = tmp_path / "tradera_auth_state.json"
+        mgr = TraderaSessionManager(state_path=state_file)
+
+        # 1. Manual cookies
+        mgr.save_manual_cookies(trd_at="jwt_token_123", trd_rt="refresh_token_456")
+        assert state_file.exists()
+        assert mgr.has_saved_session() is True
+
+        with open(state_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        names = [c["name"] for c in data["cookies"]]
+        assert "trd_at" in names
+        assert "trd_rt" in names
+
+        # 2. Cookie string
+        mgr.save_cookie_string("trd_at=abc; trd_rt=xyz; other=123")
+        with open(state_file, "r", encoding="utf-8") as f:
+            data2 = json.load(f)
+        names2 = [c["name"] for c in data2["cookies"]]
+        assert set(names2) == {"trd_at", "trd_rt", "other"}
+

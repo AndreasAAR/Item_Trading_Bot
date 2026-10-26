@@ -30,8 +30,7 @@ class TraderaUnlister:
                 page = context.new_page()
 
                 print(f"Navigating to Tradera listing #{item_id}...", flush=True)
-                page.goto(item_url, timeout=35000)
-                page.wait_for_load_state("domcontentloaded")
+                page.goto(item_url, timeout=35000, wait_until="domcontentloaded")
                 time.sleep(2)
 
                 # Check if item is already ended or sold
@@ -51,7 +50,15 @@ class TraderaUnlister:
                     'a[href*="end-early"]'
                 ).first
 
-                if not end_btn.is_visible(timeout=3000):
+                if not end_btn.is_visible(timeout=2000):
+                    # Check under 'Visa alternativ' banner at the top of the item page
+                    alt_menu = page.locator('text=Visa alternativ, button:has-text("Visa alternativ")').first
+                    if alt_menu.is_visible(timeout=2000):
+                        alt_menu.click()
+                        time.sleep(1)
+                        end_btn = page.locator('button:has-text("Avsluta"), a:has-text("Avsluta"), li:has-text("Avsluta"), [role="menuitem"]:has-text("Avsluta")').first
+
+                if not end_btn.is_visible(timeout=2000):
                     # Check under 'Hantera' / 3-dots action menu on the listing
                     manage_btn = page.locator('button:has-text("Hantera"), [aria-label*="Hantera"], button:has-text("Meny")').first
                     if manage_btn.is_visible(timeout=2000):

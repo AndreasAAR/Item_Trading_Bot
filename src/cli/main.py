@@ -361,7 +361,12 @@ def cmd_tradera_login(args=None):
     """Log in to Tradera and save session state for unlisting."""
     from src.tradera.session import TraderaSessionManager
     mgr = TraderaSessionManager()
-    mgr.interactive_login()
+    if getattr(args, "cookies", None):
+        mgr.save_cookie_string(args.cookies)
+    elif getattr(args, "trd_at", None):
+        mgr.save_manual_cookies(args.trd_at, getattr(args, "trd_rt", ""))
+    else:
+        mgr.interactive_login()
 
 def cmd_sync_sold(args):
     """Bidirectional sold reconciliation: Tradera <-> Blocket & Facebook."""
@@ -446,7 +451,11 @@ def main():
     p_dedupe.add_argument("--merge", action="store_true", help="Automatically merge detected duplicates into primary listing")
 
     # tradera-login
-    subparsers.add_parser("tradera-login", help="Log in to Tradera and save session state for unlisting")
+    p_traderalogin = subparsers.add_parser("tradera-login", help="Log in to Tradera and save session state for unlisting")
+    p_traderalogin.add_argument("--trd-at", help="Tradera access token cookie (trd_at JWT)")
+    p_traderalogin.add_argument("--trd-rt", default="", help="Tradera refresh token cookie (trd_rt)")
+    p_traderalogin.add_argument("--cookies", help="Full raw Cookie header string copied from tradera.com")
+
 
     # sync-sold
     p_sync_sold = subparsers.add_parser("sync-sold", help="Detect items sold on Tradera/Blocket and unlist cross-platform")
