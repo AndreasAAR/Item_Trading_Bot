@@ -103,10 +103,15 @@ This document outlines the sequential phases of development, tracking current pr
 ---
 
 ## Phase 11: Bidirectional Sold Sync (Blocket & Facebook ➔ Tradera)
-- [x] Create `TraderaSessionManager` and interactive login command (`tradera-login`).
+- [x] Create `TraderaSessionManager` and interactive/manual cookie import (`tradera-login [--cookies|--trd-at]`).
 - [x] Implement Blocket `Avslutade` sales detector (`get_ended_sold_titles()`).
-- [x] Implement `TraderaUnlister` (`src/tradera/unlister.py`) to end listings early on Tradera when sold on external channels.
+- [x] Implement `TraderaUnlister` (`src/tradera/unlister.py`):
+  - Primary flow: navigates to **Aktiva annonser** (`https://www.tradera.com/my/listings`), locates listing by formatted item ID or title, clicks **Mer** ➔ **Avsluta annons**.
+  - Secondary fallback: direct item page with top seller banner (`Visa alternativ` ➔ `Avsluta`).
+  - Batching: `end_listings()` shares single browser context across items.
 - [x] Wire bidirectional reconciliation (`reconcile_all()`) into `sync-sold` and daily sync.
-- [x] Comprehensive unit tests in `tests/test_unlister.py`.
+- [x] Integrated into GitHub Actions daily workflow (`.github/workflows/daily_sync.yml`) with `TRADERA_AUTH_STATE` secret restoration.
+- [x] Comprehensive unit tests in `tests/test_unlister.py` (29 passed).
+
 
 
