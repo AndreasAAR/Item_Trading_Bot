@@ -273,7 +273,7 @@ def cmd_sync(args):
                 unsynced_blocket,
                 headless=getattr(args, "headless", False),
                 delay_between=1.5,
-                on_success=lambda i_id, url: repo.update_status(i_id, "drafted", blocket_ad_url=url)
+                on_success=lambda i_id, url, status="drafted": repo.update_status(i_id, status, blocket_ad_url=url)
             )
         else:
             console.print("[bold green]All items are already synchronized to Blocket drafts![/bold green]")
