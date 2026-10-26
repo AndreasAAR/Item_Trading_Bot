@@ -14,6 +14,9 @@ STAGED_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 TRADERA_USER_ID = "2195678"
 TRADERA_ALIAS = "odenplan-sales"
 TRADERA_PROFILE_URL = f"https://www.tradera.com/profile/items/{TRADERA_USER_ID}/{TRADERA_ALIAS}"
+TRADERA_AUTH_STATE_PATH = DATA_DIR / "tradera_auth_state.json"
+TRADERA_LOGIN_URL = "https://www.tradera.com/login"
+TRADERA_MY_PAGES_URL = "https://www.tradera.com/my-tradera/selling"
 
 import os
 

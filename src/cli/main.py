@@ -357,18 +357,27 @@ def cmd_dedupe(args):
                 else:
                     console.print(f"    [bold red][FAIL] Failed to merge #{d['item_id']}[/bold red]")
 
+def cmd_tradera_login(args=None):
+    """Log in to Tradera and save session state for unlisting."""
+    from src.tradera.session import TraderaSessionManager
+    mgr = TraderaSessionManager()
+    mgr.interactive_login()
+
 def cmd_sync_sold(args):
-    """Reconcile items sold on Tradera: unlist active listings and delete drafts on Blocket, and remove from Facebook."""
-    console.print(Panel("[bold green]Checking Tradera for sold items & unlisting from Blocket/Facebook...[/bold green]"))
+    """Bidirectional sold reconciliation: Tradera <-> Blocket & Facebook."""
+    console.print(Panel("[bold green]Running Bidirectional Sold Reconciliation (Tradera <-> Blocket & Facebook)...[/bold green]"))
     from src.reconciliation.sold_checker import SoldReconciler
     reconciler = SoldReconciler()
     dry_run = getattr(args, "dry_run", False)
     headless = getattr(args, "headless", True)
-    results = reconciler.reconcile_sold_items(dry_run=dry_run, headless=headless)
-    if not results:
-        console.print("[bold green][OK] No new sold items detected. Everything is in sync![/bold green]")
+    results = reconciler.reconcile_all(dry_run=dry_run, headless=headless)
+    tradera_count = len(results.get("tradera_sales", []))
+    external_count = len(results.get("external_sales", []))
+    total = tradera_count + external_count
+    if total == 0:
+        console.print("[bold green][OK] No new sold items detected on any platform. Everything is in sync![/bold green]")
     else:
-        console.print(f"[bold green][OK] Sold reconciliation complete for {len(results)} item(s)![/bold green]")
+        console.print(f"[bold green][OK] Reconciled {total} item(s) (Tradera: {tradera_count}, External: {external_count})![/bold green]")
 
 def main():
     parser = argparse.ArgumentParser(description="Tradera -> Blocket & Facebook Marketplace Item Trading Bot")
@@ -436,8 +445,11 @@ def main():
     p_dedupe = subparsers.add_parser("dedupe", help="Scan and optionally merge duplicate listings")
     p_dedupe.add_argument("--merge", action="store_true", help="Automatically merge detected duplicates into primary listing")
 
+    # tradera-login
+    subparsers.add_parser("tradera-login", help="Log in to Tradera and save session state for unlisting")
+
     # sync-sold
-    p_sync_sold = subparsers.add_parser("sync-sold", help="Detect items sold on Tradera and unlist from Blocket & Facebook")
+    p_sync_sold = subparsers.add_parser("sync-sold", help="Detect items sold on Tradera/Blocket and unlist cross-platform")
     p_sync_sold.add_argument("--dry-run", action="store_true", help="Preview items to unlist without deleting")
     p_sync_sold.add_argument("--headless", action="store_true", default=True, help="Run browser in background")
 
@@ -454,6 +466,7 @@ def main():
         "fetch": cmd_fetch,
         "list": cmd_list,
         "login": cmd_login,
+        "tradera-login": cmd_tradera_login,
         "fb-login": cmd_fb_login,
         "draft": cmd_draft,
         "publish": cmd_publish,

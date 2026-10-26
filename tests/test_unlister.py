@@ -99,3 +99,45 @@ class TestSoldReconciler:
 
         mock_repo.update_status.assert_called_once_with("200", "sold")
         mock_repo.update_facebook_status.assert_called_once_with("200", "sold")
+
+    def test_reconcile_external_sales_blocket_to_tradera(self):
+        mock_repo = MagicMock()
+        mock_tradera_client = MagicMock()
+        mock_tradera_unlister = MagicMock()
+        mock_blocket = MagicMock()
+        mock_fb = MagicMock()
+
+        # Blocket Avslutade tab reports an item sold
+        mock_blocket.get_ended_sold_titles.return_value = ["COS svart kofta, storlek M"]
+
+        # Local DB has item 300 active
+        mock_repo.list_items.return_value = [
+            {"item_id": "300", "title": "COS svart kofta, storlek M", "status": "published", "url": "http://tradera/300"},
+        ]
+        mock_tradera_unlister.end_listing.return_value = True
+        mock_fb.unlist_item.return_value = True
+
+        reconciler = SoldReconciler(
+            repository=mock_repo,
+            tradera_client=mock_tradera_client,
+            tradera_unlister=mock_tradera_unlister,
+            blocket_unlister=mock_blocket,
+            facebook_unlister=mock_fb
+        )
+
+        results = reconciler.reconcile_external_sales(dry_run=False)
+        assert len(results) == 1
+        assert results[0]["item_id"] == "300"
+        assert results[0]["tradera_ended"] is True
+        assert results[0]["facebook_deleted"] is True
+
+        mock_tradera_unlister.end_listing.assert_called_once()
+        mock_repo.update_status.assert_called_once_with("300", "sold")
+        mock_repo.update_facebook_status.assert_called_once_with("300", "sold")
+
+    def test_tradera_unlister_notice_without_session(self):
+        from src.tradera.unlister import TraderaUnlister
+        mock_session_mgr = MagicMock()
+        mock_session_mgr.has_saved_session.return_value = False
+        unlister = TraderaUnlister(session_manager=mock_session_mgr)
+        assert unlister.end_listing("http://tradera/1", "1") is False

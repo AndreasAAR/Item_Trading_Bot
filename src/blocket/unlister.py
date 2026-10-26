@@ -184,3 +184,41 @@ class BlocketUnlister:
         """Convenience method to unlist a single item by title."""
         res = self.unlist_items([title], headless=headless)
         return res.get(title, {"deleted_aktiva": False, "deleted_utkast": False, "removed": False})
+
+    def get_ended_sold_titles(self, headless: bool = True) -> List[str]:
+        """
+        Navigates to Blocket 'Avslutade' tab and returns titles of ads marked as 'Såld'.
+        """
+        sold_titles: List[str] = []
+        try:
+            with sync_playwright() as p:
+                context = self.session_manager.get_context(p, headless=headless)
+                page = context.new_page()
+                page.goto("https://www.blocket.se/my-items", timeout=45000)
+                page.wait_for_load_state("domcontentloaded")
+                time.sleep(2)
+
+                avslutade = page.locator("label").filter(has_text="Avslutade").first
+                if avslutade.is_visible(timeout=4000):
+                    avslutade.click()
+                    time.sleep(2)
+                    cards_data = page.evaluate("""() => {
+                        const titles = [];
+                        document.querySelectorAll('h2, h3').forEach(h => {
+                            const t = h.innerText.trim();
+                            if (t.length > 3 && !t.includes('Mina annonser')) {
+                                const container = h.closest('article') || h.parentElement.parentElement;
+                                const text = container ? container.innerText : '';
+                                if (text.includes('Såld') || text.includes('Sald')) {
+                                    titles.push(t);
+                                }
+                            }
+                        });
+                        return titles;
+                    }""")
+                    sold_titles.extend(cards_data)
+                context.close()
+        except Exception as e:
+            print(f"Error fetching Blocket Avslutade sold titles: {e}", flush=True)
+
+        return sold_titles
