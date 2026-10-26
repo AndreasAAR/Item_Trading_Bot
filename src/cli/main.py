@@ -251,6 +251,10 @@ def cmd_sync(args):
     # 1. Fetch fresh items from Tradera
     cmd_fetch()
 
+    # 1.5. Reconcile sold items on Tradera -> unlist from Blocket (Aktiva & Utkast) & Facebook
+    console.print("\n[bold cyan]Checking for sold items on Tradera to unlist...[/bold cyan]")
+    cmd_sync_sold(argparse.Namespace(dry_run=False, headless=getattr(args, "headless", True)))
+
     # 2. Sync to Blocket if requested
     if target in ["blocket", "all"]:
         session_mgr = BlocketSessionManager()
@@ -353,8 +357,18 @@ def cmd_dedupe(args):
                 else:
                     console.print(f"    [bold red][FAIL] Failed to merge #{d['item_id']}[/bold red]")
 
-    if not getattr(args, "merge", False):
-        console.print("\n[yellow]Tip: Run 'python -m src.cli dedupe --merge' to automatically merge duplicates and retain active platform statuses.[/yellow]")
+def cmd_sync_sold(args):
+    """Reconcile items sold on Tradera: unlist active listings and delete drafts on Blocket, and remove from Facebook."""
+    console.print(Panel("[bold green]Checking Tradera for sold items & unlisting from Blocket/Facebook...[/bold green]"))
+    from src.reconciliation.sold_checker import SoldReconciler
+    reconciler = SoldReconciler()
+    dry_run = getattr(args, "dry_run", False)
+    headless = getattr(args, "headless", True)
+    results = reconciler.reconcile_sold_items(dry_run=dry_run, headless=headless)
+    if not results:
+        console.print("[bold green][OK] No new sold items detected. Everything is in sync![/bold green]")
+    else:
+        console.print(f"[bold green][OK] Sold reconciliation complete for {len(results)} item(s)![/bold green]")
 
 def main():
     parser = argparse.ArgumentParser(description="Tradera -> Blocket & Facebook Marketplace Item Trading Bot")
@@ -422,6 +436,11 @@ def main():
     p_dedupe = subparsers.add_parser("dedupe", help="Scan and optionally merge duplicate listings")
     p_dedupe.add_argument("--merge", action="store_true", help="Automatically merge detected duplicates into primary listing")
 
+    # sync-sold
+    p_sync_sold = subparsers.add_parser("sync-sold", help="Detect items sold on Tradera and unlist from Blocket & Facebook")
+    p_sync_sold.add_argument("--dry-run", action="store_true", help="Preview items to unlist without deleting")
+    p_sync_sold.add_argument("--headless", action="store_true", default=True, help="Run browser in background")
+
     args = parser.parse_args()
 
     # Default to sync if no command provided
@@ -431,6 +450,7 @@ def main():
 
     commands = {
         "sync": cmd_sync,
+        "sync-sold": cmd_sync_sold,
         "fetch": cmd_fetch,
         "list": cmd_list,
         "login": cmd_login,
