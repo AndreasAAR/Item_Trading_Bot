@@ -28,8 +28,8 @@ Maintain the following artifacts, adapting locations to existing repository conv
 - `docs/CODEMAP.md` — key files, classes, functions, interfaces, entry points, tests, and extension points[cite: 2].  
 - `docs/DECISIONS.md` — significant architectural decisions, constraints, and reasons for non-obvious design choices[cite: 2].  
 - `docs/generated/` — machine-generated file inventories, symbol indexes, and dependency information[cite: 2].  
-- Module-level docs (`module_*/docs/readme.md`, `decisions.md`, `codemap.md`, `architecture.md`) to offload details from main docs and prevent bloat[cite: 2].  
 - `README.md` — summarized overview tailored for recruiters, system owners, or tech leads[cite: 2].
+- IF (ONLY IF) PROJECT REACHES AROUND A 100+ FILES THEN ADD: Module-level docs (`module_*/docs/readme.md`, `decisions.md`, `codemap.md`, `architecture.md`) to offload details from main docs and prevent bloat[cite: 2].
 
 ## 2. Architecture Documentation Requirements
 - **ARCHITECTURE.md must describe:** Purpose, subsystems, boundaries, entry points, execution flows, permitted dependency directions, configuration locations, extension points, and build/test/lint commands[cite: 2].
