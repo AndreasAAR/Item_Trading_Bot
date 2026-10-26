@@ -35,6 +35,7 @@ jobs:
         env:
           BLOCKET_AUTH_STATE: ${{ secrets.BLOCKET_AUTH_STATE }}
           FB_AUTH_STATE: ${{ secrets.FB_AUTH_STATE }}
+          TRADERA_AUTH_STATE: ${{ secrets.TRADERA_AUTH_STATE }}
         run: |
           mkdir -p data
           if [ -n "$BLOCKET_AUTH_STATE" ]; then
@@ -50,6 +51,14 @@ jobs:
           else
             echo "Warning: FB_AUTH_STATE secret is not set."
           fi
+
+          if [ -n "$TRADERA_AUTH_STATE" ]; then
+            echo "$TRADERA_AUTH_STATE" > data/tradera_auth_state.json
+            echo "Restored Tradera session state."
+          else
+            echo "Warning: TRADERA_AUTH_STATE secret is not set."
+          fi
+
 
       - name: Run Multi-Platform Sync Pipeline
         run: |

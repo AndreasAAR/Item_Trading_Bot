@@ -201,7 +201,12 @@ class SoldReconciler:
         for it in matched_sales:
             item_id = it["item_id"]
             url = it.get("url") or f"https://www.tradera.com/item/0/{item_id}/item"
-            t_ended = self.tradera_unlister.end_listing(item_url=url, item_id=item_id, headless=headless)
+            t_ended = self.tradera_unlister.end_listing(
+                item_url=url,
+                item_id=item_id,
+                title=it.get("title"),
+                headless=headless
+            )
 
             # 2. Unlist from Facebook Marketplace
             fb_ended = self.facebook_unlister.unlist_item(it["title"], headless=headless)

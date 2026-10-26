@@ -16,7 +16,8 @@ TRADERA_ALIAS = "odenplan-sales"
 TRADERA_PROFILE_URL = f"https://www.tradera.com/profile/items/{TRADERA_USER_ID}/{TRADERA_ALIAS}"
 TRADERA_AUTH_STATE_PATH = DATA_DIR / "tradera_auth_state.json"
 TRADERA_LOGIN_URL = "https://www.tradera.com/login"
-TRADERA_MY_PAGES_URL = "https://www.tradera.com/my-tradera/selling"
+TRADERA_MY_PAGES_URL = "https://www.tradera.com/my/listings"
+
 
 import os
 
