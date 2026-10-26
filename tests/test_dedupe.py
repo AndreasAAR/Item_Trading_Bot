@@ -107,7 +107,10 @@ def test_relist_detection_and_status_preservation():
         assert updated_item["facebook_status"] == "published"
         assert updated_item["blocket_ad_url"] == "https://blocket.se/recommerce/create/1234"
         assert updated_item["facebook_ad_url"] == "https://facebook.com/marketplace/1234"
-        assert updated_item["target_price"] == 750
+        assert updated_item["ladder_step"] == 1
+        assert updated_item["target_price"] == 1039  # Step 1 buffer (800 * 1.30 = 1040 -> 1039)
+        assert updated_item["cover_image_index"] == 1
+        assert updated_item["relist_count"] == 1
 
         # Verify old item_id 1001 was replaced
         assert repo.get_item("1001") is None

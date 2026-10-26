@@ -113,5 +113,33 @@ This document outlines the sequential phases of development, tracking current pr
 - [x] Integrated into GitHub Actions daily workflow (`.github/workflows/daily_sync.yml`) with `TRADERA_AUTH_STATE` secret restoration.
 - [x] Comprehensive unit tests in `tests/test_unlister.py` (29 passed).
 
+---
+
+## Phase 12: Full-Spectrum Pricing Ladder (-30% to +30%) & Visual Image Rotation
+- [x] Implemented **5-Phase Anti-Spam Pricing Ladder** (`src/pricing/ladder.py`):
+  - `Step 0: Premium Anchor (+30%)`: Initial listing price above baseline.
+  - `Step 1: Premium Buffer`: Same price, zero notifications sent.
+  - `Step 2: Baseline Drop`: Dips to baseline price, triggering marketplace "Prissänkt" push alert #1.
+  - `Step 3: Baseline Buffer`: Same price, zero notifications sent.
+  - `Step 4: Bargain Floor (-30%)`: Dips to minimum floor, triggering clearance "Prissänkt" push alert #2.
+  - Wraps back to `Step 0` upon next relist, creating buyer FOMO that the promotional discount ended.
+- [x] **Digit-9 Rounding Rule** (`round_to_nine`):
+  - All calculated prices round down to end with digit `9` (e.g. 455 -> 449 kr, 350 -> 349 kr, 245 -> 239 kr, 149 -> 99 kr).
+  - Hard minimum floor enforced (default 59 kr).
+- [x] **Visual Thumbnail Rotation**:
+  - `cover_image_index` increments on each relist cycle.
+  - Rotates primary upload photo for Blocket (`src/blocket/drafter.py`) and Facebook (`src/facebook/drafter.py`) to give fresh visual appeal.
+  - Preserves canonical Tradera image URLs in SQLite, maintaining 100% deduplication accuracy.
+- [x] **Database & Repository Integration** (`src/storage/database.py`, `src/storage/repository.py`):
+  - Migrated schema with `base_price`, `floor_price`, `cover_image_index`, `relist_count`, `pricing_phase`, `ladder_step`, `last_price_change_at`, `last_relisted_at`.
+  - Automatic ladder progression on relist detection in `upsert_item_detailed`.
+- [x] **CLI Subcommands** (`src/cli/main.py`):
+  - `python -m src.cli ladder`: Rich table showing items, current phase, target price, next transition, and image index.
+  - `python -m src.cli advance-ladder [--item-id ID | --all]`: Advance ladder stages and rotate cover photo.
+  - `python -m src.cli set-floor <ID> <PRICE>`: Set custom price floor (auto-rounded down to 9).
+- [x] **Automated Test Suite**:
+  - 36 total unit tests passing (`tests/test_pricing_ladder.py`, `tests/test_storage.py`, `tests/test_dedupe.py`, `tests/test_unlister.py`).
+
+
 
 

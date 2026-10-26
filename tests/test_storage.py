@@ -26,7 +26,8 @@ def test_sync_repository_crud():
         saved = repo.get_item("12345")
         assert saved is not None
         assert saved["title"] == "Sample Jacket"
-        assert saved["target_price"] == 450
+        assert saved["base_price"] == 450
+        assert saved["target_price"] == 579  # Step 0 anchor (+30%): 450 * 1.30 = 585 -> 579
         assert saved["status"] == "discovered"
         assert len(saved["images"]) == 1
 

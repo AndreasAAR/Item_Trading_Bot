@@ -317,6 +317,96 @@ def cmd_set_price(args):
     repo.update_price(args.item_id, args.price)
     console.print(f"[green]Updated item {args.item_id} price to {args.price} kr.[/green]")
 
+def cmd_set_floor(args):
+    """Set custom floor price for an item."""
+    from src.pricing.ladder import round_to_nine
+    repo = SyncRepository()
+    item = repo.get_item(args.item_id)
+    if not item:
+        console.print(f"[red]Item {args.item_id} not found.[/red]")
+        return
+    floor = round_to_nine(args.floor)
+    success = repo.set_floor_price(args.item_id, floor)
+    if success:
+        console.print(f"[bold green][OK] Floor price for #{args.item_id} set to {floor} kr.[/bold green]")
+    else:
+        console.print(f"[red]Failed to update floor price for #{args.item_id}.[/red]")
+
+def cmd_ladder(args):
+    """View items and their 5-phase pricing ladder stages and image rotation status."""
+    repo = SyncRepository()
+    items = repo.list_ladder_items()
+    if not items:
+        console.print("[yellow]No items found in database.[/yellow]")
+        return
+
+    table = Table(title=f"Pricing Ladder & Visual Rotation ({len(items)} items)")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Title", style="white", max_width=30)
+    table.add_column("Base", justify="right", style="white")
+    table.add_column("Floor", justify="right", style="dim red")
+    table.add_column("Step", justify="center")
+    table.add_column("Current Price", justify="right", style="bold yellow")
+    table.add_column("Next Transition", style="magenta")
+    table.add_column("Img #", justify="center", style="blue")
+    table.add_column("Relists", justify="center", style="dim")
+
+    for it in items:
+        step = it.get("ladder_step", 0)
+        curr_price = it.get("target_price", 0)
+        base = it.get("base_price", 0)
+        floor = it.get("floor_price", 0)
+        next_p = it.get("next_price", 0)
+        next_drop = it.get("next_is_drop", False)
+
+        step_str = f"S{step}: {it.get('stage_name', '')}"
+        if it.get("is_drop_event"):
+            step_str = f"[bold green]{step_str}*[/bold green]"
+
+        next_str = f"S{it.get('next_step')}: {next_p} kr"
+        if next_drop:
+            next_str += " [bold green](DROP!)[/bold green]"
+
+        table.add_row(
+            str(it["item_id"]),
+            it["title"][:30],
+            f"{base} kr",
+            f"{floor} kr",
+            step_str,
+            f"{curr_price} kr",
+            next_str,
+            f"#{it.get('cover_image_index', 0)}",
+            str(it.get("relist_count", 0))
+        )
+
+    console.print(table)
+    console.print("[dim]* = Price drop alert triggered on platform during this stage[/dim]")
+
+def cmd_advance_ladder(args):
+    """Manually advance item(s) to the next ladder step and rotate cover image."""
+    repo = SyncRepository()
+    if getattr(args, "item_id", None):
+        res = repo.advance_item_ladder(args.item_id)
+        if not res:
+            console.print(f"[red]Item {args.item_id} not found.[/red]")
+            return
+        drop_tag = " [bold green](PRICE DROP ALERT!)[/bold green]" if res["is_drop_event"] else ""
+        console.print(
+            f"[bold green][OK] Advanced Item #{args.item_id}:[/bold green]\n"
+            f"  • New Stage: [bold yellow]Step {res['ladder_step']} ({res['stage_desc']})[/bold yellow]{drop_tag}\n"
+            f"  • New Price: [bold yellow]{res['target_price']} kr[/bold yellow] (Floor: {res['floor_price']} kr)\n"
+            f"  • Cover Image Index: [cyan]#{res['cover_image_index']}[/cyan] (Relist Count: {res['relist_count']})"
+        )
+    elif getattr(args, "all", False):
+        items = repo.list_items()
+        count = 0
+        for it in items:
+            repo.advance_item_ladder(it["item_id"])
+            count += 1
+        console.print(f"[bold green][OK] Advanced all {count} items to their next ladder stage and cover image.[/bold green]")
+    else:
+        console.print("[red]Please specify --item-id <ID> or --all.[/red]")
+
 def cmd_clean_drafts(args):
     """Delete all drafts from Blocket cloud account and reset local item statuses."""
     from src.blocket.cleaner import BlocketDraftCleaner
@@ -446,6 +536,19 @@ def main():
     p_price.add_argument("item_id", help="Item ID")
     p_price.add_argument("price", type=int, help="Target price in SEK")
 
+    # set-floor
+    p_floor = subparsers.add_parser("set-floor", help="Set custom floor price for an item")
+    p_floor.add_argument("item_id", help="Item ID")
+    p_floor.add_argument("floor", type=int, help="Floor price in SEK (auto-rounded down to 9)")
+
+    # ladder
+    subparsers.add_parser("ladder", help="View pricing ladder stages and visual rotation status")
+
+    # advance-ladder
+    p_adv = subparsers.add_parser("advance-ladder", help="Advance item(s) along pricing ladder and rotate cover photo")
+    p_adv.add_argument("--item-id", help="Item ID to advance")
+    p_adv.add_argument("--all", action="store_true", help="Advance all items")
+
     # dedupe
     p_dedupe = subparsers.add_parser("dedupe", help="Scan and optionally merge duplicate listings")
     p_dedupe.add_argument("--merge", action="store_true", help="Automatically merge detected duplicates into primary listing")
@@ -482,6 +585,9 @@ def main():
         "fb-draft": cmd_fb_draft,
         "clean-drafts": cmd_clean_drafts,
         "set-price": cmd_set_price,
+        "set-floor": cmd_set_floor,
+        "ladder": cmd_ladder,
+        "advance-ladder": cmd_advance_ladder,
         "dedupe": cmd_dedupe,
     }
 

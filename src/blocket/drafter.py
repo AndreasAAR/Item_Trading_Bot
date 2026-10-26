@@ -26,10 +26,14 @@ class BlocketDrafter:
             tradera_cat_id=item_data.get("category_id")
         )
 
-        # Download and stage images locally
+        # Download and stage images locally (with visual rotation based on cover_image_index)
+        from src.pricing.ladder import get_rotated_images
         image_urls = item_data.get("images", [])
         staged_image_paths = download_item_images(item_id, image_urls)
-        print(f"Staged {len(staged_image_paths)} images for item {item_id}.")
+        cover_idx = item_data.get("cover_image_index", 0)
+        staged_image_paths = get_rotated_images(staged_image_paths, cover_idx)
+        print(f"Staged {len(staged_image_paths)} images for item {item_id} (cover index: #{cover_idx % len(staged_image_paths) if staged_image_paths else 0}).")
+
 
         print("Navigating to Blocket create item start...")
         page.goto(BLOCKET_NEW_AD_URL, timeout=45000)

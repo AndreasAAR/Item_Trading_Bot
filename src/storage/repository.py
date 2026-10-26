@@ -76,20 +76,31 @@ class SyncRepository:
                 matched_item, reason = match
                 old_id = matched_item["item_id"]
 
-                # Relisted item detected! Update existing row to the new Tradera item_id and new URLs,
+                # Relisted item detected! Advance ladder step & cover image index,
                 # while preserving status, blocket_ad_id, blocket_ad_url, facebook_status, facebook_ad_url!
+                from src.pricing.ladder import advance_item_ladder
+                adv = advance_item_ladder(matched_item)
+                new_ladder_step = adv["ladder_step"]
+                new_target_price = adv["target_price"]
+                new_cover_index = adv["cover_image_index"]
+                new_relist_count = adv["relist_count"]
+                stage_desc = adv["stage_desc"]
+
                 cursor.execute("""
                     UPDATE items SET
                         item_id = ?, title = ?, url = ?, description = ?, category_id = ?,
                         buy_now_price = ?, starting_price = ?, leading_bid = ?, target_price = ?,
                         images_json = ?, attributes_json = ?, shipping_cost = ?, pickup_available = ?,
+                        ladder_step = ?, cover_image_index = ?, relist_count = ?,
+                        pricing_phase = ?, last_relisted_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE item_id = ?
                 """, (
                     item.item_id, item.title, item.url, item.description, item.category_id,
-                    item.buy_now_price, item.starting_price, item.leading_bid, target_price,
+                    item.buy_now_price, item.starting_price, item.leading_bid, new_target_price,
                     images_json, attrs_json, item.shipping_cost, int(item.pickup_available),
-                    old_id
+                    new_ladder_step, new_cover_index, new_relist_count,
+                    adv["stage_name"], old_id
                 ))
 
                 # Update sync_logs foreign keys to point to the new item_id
@@ -102,25 +113,34 @@ class SyncRepository:
                 """, (
                     item.item_id,
                     matched_item.get("status", default_status),
-                    f"Relist detected ({reason}): ID changed from #{old_id} to #{item.item_id}. Preserved Blocket [{matched_item.get('status')}] and Facebook [{matched_item.get('facebook_status')}]."
+                    f"Relist detected ({reason}): ID #{old_id} -> #{item.item_id}. Advanced ladder to Step {new_ladder_step} ({stage_desc}, target: {new_target_price} kr, cover img #{new_cover_index})."
                 ))
                 return "relisted", matched_item, reason
 
-            # 3. Completely new item -> insert fresh record
+            # 3. Completely new item -> insert fresh record with initial ladder Step 0 (+30% anchor)
+            from src.pricing.ladder import calculate_ladder_price, round_to_nine
+            base_price = target_price
+            floor_price = round_to_nine(base_price * 0.70)
+            initial_price, stage = calculate_ladder_price(base_price, step=0, custom_floor=floor_price)
+
             cursor.execute("""
                 INSERT INTO items (
                     item_id, title, url, description, category_id,
                     buy_now_price, starting_price, leading_bid, target_price,
+                    base_price, floor_price, ladder_step, cover_image_index,
+                    relist_count, pricing_phase,
                     images_json, attributes_json, shipping_cost, pickup_available,
                     status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 'premium', ?, ?, ?, ?, ?)
             """, (
                 item.item_id, item.title, item.url, item.description, item.category_id,
-                item.buy_now_price, item.starting_price, item.leading_bid, target_price,
+                item.buy_now_price, item.starting_price, item.leading_bid, initial_price,
+                base_price, floor_price,
                 images_json, attrs_json, item.shipping_cost, int(item.pickup_available),
                 default_status
             ))
             return "new", None, None
+
 
     def upsert_item(self, item: TraderaItemDetail, default_status: str = "discovered") -> bool:
         """Insert or update Tradera item. If item already exists or is a relist, preserves non-discovered status."""
@@ -296,4 +316,98 @@ class SyncRepository:
             # Delete the duplicate row
             cursor.execute("DELETE FROM items WHERE item_id = ?", (duplicate_id,))
             return True
+
+    def advance_item_ladder(self, item_id: str) -> Optional[Dict[str, Any]]:
+        """Advances an item to its next pricing ladder step and cover image index."""
+        from src.pricing.ladder import advance_item_ladder as compute_advance
+        item = self.get_item(item_id)
+        if not item:
+            return None
+
+        adv = compute_advance(item)
+        with get_db(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE items SET
+                    ladder_step = ?,
+                    target_price = ?,
+                    cover_image_index = ?,
+                    relist_count = ?,
+                    pricing_phase = ?,
+                    last_price_change_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = ?
+            """, (
+                adv["ladder_step"],
+                adv["target_price"],
+                adv["cover_image_index"],
+                adv["relist_count"],
+                adv["stage_name"],
+                item_id
+            ))
+            cursor.execute("""
+                INSERT INTO sync_logs (item_id, action, status, message)
+                VALUES (?, 'ladder_advanced', ?, ?)
+            """, (
+                item_id,
+                item.get("status", "discovered"),
+                f"Ladder advanced to Step {adv['ladder_step']} ({adv['stage_desc']}, {adv['target_price']} kr, img #{adv['cover_image_index']})"
+            ))
+        return adv
+
+    def set_base_price(self, item_id: str, base_price: int, floor_price: Optional[int] = None) -> bool:
+        """Sets the baseline price and optionally floor price for an item."""
+        from src.pricing.ladder import round_to_nine
+        calculated_floor = floor_price or round_to_nine(base_price * 0.70)
+        with get_db(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE items SET
+                    base_price = ?,
+                    floor_price = ?,
+                    target_price = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = ?
+            """, (base_price, calculated_floor, base_price, item_id))
+            return cursor.rowcount > 0
+
+    def set_floor_price(self, item_id: str, floor_price: int) -> bool:
+        """Sets a custom hard floor price for an item."""
+        with get_db(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE items SET
+                    floor_price = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = ?
+            """, (floor_price, item_id))
+            return cursor.rowcount > 0
+
+    def list_ladder_items(self) -> List[Dict[str, Any]]:
+        """Returns all items enriched with pricing ladder stage metadata."""
+        from src.pricing.ladder import get_ladder_stage_info, calculate_ladder_price
+        items = self.list_items()
+        enriched = []
+        for it in items:
+            base = it.get("base_price") or it.get("target_price") or 100
+            step = it.get("ladder_step") or 0
+            floor = it.get("floor_price")
+            curr_stage = get_ladder_stage_info(step)
+
+            next_step = (step + 1) % 5
+            next_price, next_stage = calculate_ladder_price(base, next_step, custom_floor=floor)
+
+            d = dict(it)
+            d["base_price"] = base
+            d["ladder_step"] = step
+            d["stage_name"] = curr_stage["name"]
+            d["stage_desc"] = curr_stage["description"]
+            d["is_drop_event"] = curr_stage["is_drop_event"]
+            d["next_step"] = next_step
+            d["next_price"] = next_price
+            d["next_is_drop"] = next_stage["is_drop_event"]
+            d["next_stage_desc"] = next_stage["description"]
+            enriched.append(d)
+        return enriched
+
 

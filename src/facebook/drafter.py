@@ -49,10 +49,14 @@ class FacebookDrafter:
         if "login" in page.url.lower():
             raise RuntimeError("Not logged into Facebook. Please run 'python -m src.cli fb-login' first.")
 
-        # Step 2: Upload Images
+        # Step 2: Upload Images (with visual rotation based on cover_image_index)
         if images:
+            from src.pricing.ladder import get_rotated_images
             image_paths = download_item_images(str(item_id), images)
+            cover_idx = item_data.get("cover_image_index", 0)
+            image_paths = get_rotated_images(image_paths, cover_idx)
             valid_paths = [str(p) for p in image_paths if p.exists()]
+
             if valid_paths:
                 try:
                     file_input = page.locator('input[type="file"][accept*="image"]').first
