@@ -167,3 +167,88 @@ class TestSoldReconciler:
         names2 = [c["name"] for c in data2["cookies"]]
         assert set(names2) == {"trd_at", "trd_rt", "other"}
 
+    def test_reconcile_hidden_items_end_to_end(self):
+        mock_repo = MagicMock()
+        mock_tradera_client = MagicMock()
+        mock_tradera_unlister = MagicMock()
+        mock_blocket = MagicMock()
+        mock_fb = MagicMock()
+
+        # Tradera Dolda returns item 500
+        mock_tradera_unlister.get_hidden_listings.return_value = [
+            {"item_id": "500", "title": "Arket wool sweater, size M"}
+        ]
+
+        # Local DB has item 500 active
+        mock_repo.list_items.return_value = [
+            {"item_id": "500", "title": "Arket wool sweater, size M", "status": "published", "facebook_status": "published"},
+            {"item_id": "600", "title": "Uniqlo shirt", "status": "published", "facebook_status": "discovered"}
+        ]
+        mock_blocket.unlist_item.return_value = True
+        mock_fb.unlist_item.return_value = True
+
+        reconciler = SoldReconciler(
+            repository=mock_repo,
+            tradera_client=mock_tradera_client,
+            tradera_unlister=mock_tradera_unlister,
+            blocket_unlister=mock_blocket,
+            facebook_unlister=mock_fb
+        )
+
+        results = reconciler.reconcile_hidden_items(dry_run=False)
+        assert len(results) == 1
+        assert results[0]["item_id"] == "500"
+        assert results[0]["blocket_unlisted"] is True
+        assert results[0]["facebook_unlisted"] is True
+        assert results[0]["source"] == "tradera_hidden"
+
+        mock_blocket.unlist_item.assert_called_once_with("Arket wool sweater, size M", headless=True)
+        mock_fb.unlist_item.assert_called_once_with("Arket wool sweater, size M", headless=True)
+        mock_repo.mark_item_sold.assert_called_once_with("500", reason="tradera_hidden_list")
+
+    def test_prevent_restart_sold_items_in_repository(self, tmp_path):
+        from src.storage.repository import SyncRepository
+        from src.tradera.models import TraderaItemDetail
+
+        db_path = tmp_path / "test_sold_guard.db"
+        repo = SyncRepository(db_path=db_path)
+
+        # 1. Create and mark item as sold
+        item1 = TraderaItemDetail(
+            item_id="7001",
+            title="Vintage Ralph Lauren Polo",
+            url="https://tradera.com/item/7001",
+            description="Classic polo shirt",
+            images=["1.jpg"],
+            buy_now_price=300
+        )
+        repo.upsert_item_detailed(item1)
+        repo.mark_item_sold("7001", reason="tradera_hidden")
+
+        saved = repo.get_item("7001")
+        assert saved["status"] == "sold"
+
+        # 2. Ladder advance must be rejected
+        adv = repo.advance_item_ladder("7001")
+        assert adv is None
+
+        # 3. Relist attempt with same title must be ignored and not restarted!
+        item2 = TraderaItemDetail(
+            item_id="8002",
+            title="Vintage Ralph Lauren Polo",
+            url="https://tradera.com/item/8002",
+            description="Restarted polo shirt",
+            images=["1.jpg"],
+            buy_now_price=250
+        )
+        outcome, matched, reason = repo.upsert_item_detailed(item2)
+        assert outcome == "ignored_sold"
+        assert matched["item_id"] == "7001"
+        assert reason == "item_already_sold"
+
+        # 4. Old item still exists and is still sold
+        assert repo.get_item("7001")["status"] == "sold"
+        # 5. New item_id was not inserted into database
+        assert repo.get_item("8002") is None
+
+

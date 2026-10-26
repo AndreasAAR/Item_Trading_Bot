@@ -140,6 +140,27 @@ This document outlines the sequential phases of development, tracking current pr
 - [x] **Automated Test Suite**:
   - 36 total unit tests passing (`tests/test_pricing_ladder.py`, `tests/test_storage.py`, `tests/test_dedupe.py`, `tests/test_unlister.py`).
 
+---
+
+## Phase 13: Tradera 'Dolda' (Hidden) Reconciliation & Permanent Sold Protection
+- [x] **Tradera 'Dolda' Scraper** (`TraderaUnlister.get_hidden_listings` in `src/tradera/unlister.py`):
+  - Navigates to `https://www.tradera.com/my/listings?tab=hidden`.
+  - Extracts all item IDs and titles that have been moved to the hidden list by the seller.
+- [x] **Cross-Platform Auto-Unlisting & Reconciliation** (`reconcile_hidden_items` in `src/reconciliation/sold_checker.py`):
+  - Automatically reconciles hidden Tradera items against local database inventory.
+  - Automatically unlists any active/drafted ads on Blocket and Facebook Marketplace.
+  - Permanently updates local DB status to `sold` across all platforms (`status='sold'`, `facebook_status='sold'`).
+- [x] **Strict Sold/Restart Guard** (`SyncRepository` in `src/storage/repository.py`):
+  - `upsert_item_detailed`: If an incoming listing matches an item marked as `sold`, it is permanently ignored (`outcome="ignored_sold"`). It will **never** be relisted, restarted, or resurrected.
+  - `advance_item_ladder`: Explicitly rejects advancing ladder or prices on any item with `status="sold"`.
+  - Added repository helper `mark_item_sold(item_id, reason)` with audit logging in `sync_logs`.
+- [x] **CLI Integration** (`src/cli/main.py`):
+  - `python -m src.cli mark-sold <item_id> [--reason REASON]`: Manually mark any item as permanently sold.
+  - `python -m src.cli sync-sold`: Reconciles Tradera sales, Tradera Dolda hidden items, and Blocket sales.
+- [x] **Automated Test Suite**:
+  - 38 unit tests passing across all test modules (`tests/test_unlister.py`, `tests/test_pricing_ladder.py`, etc.).
+
+
 
 
 

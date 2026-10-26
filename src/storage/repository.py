@@ -39,6 +39,10 @@ class SyncRepository:
             row = cursor.fetchone()
 
             if row is not None:
+                row_dict = dict(row)
+                if row_dict.get("status") == "sold":
+                    # Item is already marked sold, preserve sold state
+                    return "ignored_sold", row_dict, "item_already_sold"
                 # Same Tradera item_id already exists -> update details
                 cursor.execute("""
                     UPDATE items SET
@@ -53,7 +57,7 @@ class SyncRepository:
                     images_json, attrs_json, item.shipping_cost, int(item.pickup_available),
                     item.item_id
                 ))
-                return "updated", dict(row), "exact_id"
+                return "updated", row_dict, "exact_id"
 
             # 2. Relist / Deduplication check across all existing items
             cursor.execute("SELECT * FROM items")
@@ -75,6 +79,10 @@ class SyncRepository:
             if match:
                 matched_item, reason = match
                 old_id = matched_item["item_id"]
+
+                # If the matched previous item is SOLD, DO NOT restart or relist it!
+                if matched_item.get("status") == "sold":
+                    return "ignored_sold", matched_item, "item_already_sold"
 
                 # Relisted item detected! Advance ladder step & cover image index,
                 # while preserving status, blocket_ad_id, blocket_ad_url, facebook_status, facebook_ad_url!
@@ -321,7 +329,7 @@ class SyncRepository:
         """Advances an item to its next pricing ladder step and cover image index."""
         from src.pricing.ladder import advance_item_ladder as compute_advance
         item = self.get_item(item_id)
-        if not item:
+        if not item or item.get("status") == "sold":
             return None
 
         adv = compute_advance(item)
@@ -409,5 +417,26 @@ class SyncRepository:
             d["next_stage_desc"] = next_stage["description"]
             enriched.append(d)
         return enriched
+
+    def mark_item_sold(self, item_id: str, reason: str = "manual_sold") -> bool:
+        """
+        Permanently marks an item as SOLD across all platforms in the database.
+        Ensures the item cannot be relisted, restarted, or drafted again.
+        """
+        with get_db(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE items SET
+                    status = 'sold',
+                    facebook_status = 'sold',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_id = ?
+            """, (item_id,))
+            cursor.execute("""
+                INSERT INTO sync_logs (item_id, action, status, message)
+                VALUES (?, 'marked_sold', 'sold', ?)
+            """, (item_id, f"Marked as permanently SOLD ({reason}). Protected from relist/restart."))
+            return cursor.rowcount > 0
+
 
 

@@ -172,3 +172,84 @@ class TraderaUnlister:
             context.close()
         return results
 
+    def get_hidden_listings(self, headless: bool = True) -> List[Dict[str, Any]]:
+        """
+        Navigates to Tradera 'Dolda' listings (https://www.tradera.com/my/listings?tab=hidden)
+        and extracts all item IDs and titles that have been moved to the hidden list.
+        """
+        if not self.session_manager.has_saved_session():
+            print("[NOTICE] No saved Tradera session found.", flush=True)
+            return []
+
+        try:
+            with sync_playwright() as p:
+                context = self.session_manager.get_context(p, headless=headless)
+                page = context.new_page()
+                hidden_items = self._get_hidden_listings_with_page(page)
+                context.close()
+                return hidden_items
+        except Exception as e:
+            print(f"Error fetching hidden Tradera listings: {e}", flush=True)
+            return []
+
+    def _get_hidden_listings_with_page(self, page: Page) -> List[Dict[str, Any]]:
+        """Internal helper to scrape all item IDs and titles from the Dolda (hidden) tab."""
+        url = "https://www.tradera.com/my/listings?tab=hidden"
+        print(f"Navigating to Tradera Dolda listings ({url})...", flush=True)
+        try:
+            page.goto(url, timeout=35000, wait_until="domcontentloaded")
+            time.sleep(2)
+        except Exception as e:
+            print(f"Notice navigating to {url}: {e}", flush=True)
+
+        if "login" in page.url.lower():
+            print("[WARNING] Redirected to login while checking Dolda listings. Tradera session expired.", flush=True)
+            return []
+
+        hidden_items = []
+        seen_ids = set()
+
+        # Strategy 1: Find all item links /item/.../<id>
+        links = page.locator('a[href*="/item/"]').all()
+        for link in links:
+            try:
+                href = link.get_attribute("href") or ""
+                m = re.search(r"/item/(?:[^/]+/)?(\d{8,10})", href)
+                if m:
+                    item_id = m.group(1)
+                    if item_id not in seen_ids:
+                        title = link.inner_text().strip().replace("\n", " ")
+                        seen_ids.add(item_id)
+                        hidden_items.append({
+                            "item_id": item_id,
+                            "title": title,
+                            "url": f"https://www.tradera.com/item/0/{item_id}/item"
+                        })
+            except Exception:
+                pass
+
+        # Strategy 2: If links were not found, inspect listing rows/cards
+        if not hidden_items:
+            cards = page.locator('[data-testid*="listing"], [class*="listing"], [class*="ItemCard"], tr').all()
+            for card in cards:
+                try:
+                    txt = card.inner_text()
+                    id_match = re.search(r"(\d{3}\s\d{3}\s\d{3})", txt) or re.search(r"(\d{9})", txt)
+                    if id_match:
+                        raw_id = re.sub(r"\D", "", id_match.group(1))
+                        if raw_id not in seen_ids:
+                            lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
+                            title = lines[0] if lines else ""
+                            seen_ids.add(raw_id)
+                            hidden_items.append({
+                                "item_id": raw_id,
+                                "title": title,
+                                "url": f"https://www.tradera.com/item/0/{raw_id}/item"
+                            })
+                except Exception:
+                    pass
+
+        print(f"Found {len(hidden_items)} item(s) in Tradera 'Dolda' (Hidden) tab.", flush=True)
+        return hidden_items
+
+

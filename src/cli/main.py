@@ -45,6 +45,11 @@ def cmd_fetch(args=None):
                     f"  [cyan]-> Relisted item recognized:[/cyan] '{detail.title}' "
                     f"(ID #{old_id} -> #{detail.item_id}) [{reason}] - Preserved sync states."
                 )
+            elif outcome == "ignored_sold":
+                console.print(
+                    f"  [dim yellow]-> Sold item ignored:[/dim yellow] '{detail.title}' "
+                    f"(Matches previously sold/hidden item #{matched_item['item_id']}) - Preserved SOLD status."
+                )
             else:
                 updated_count += 1
         except Exception as e:
@@ -386,9 +391,13 @@ def cmd_advance_ladder(args):
     """Manually advance item(s) to the next ladder step and rotate cover image."""
     repo = SyncRepository()
     if getattr(args, "item_id", None):
+        item = repo.get_item(args.item_id)
+        if item and item.get("status") == "sold":
+            console.print(f"[yellow]Item #{args.item_id} is marked as SOLD. Cannot advance pricing ladder.[/yellow]")
+            return
         res = repo.advance_item_ladder(args.item_id)
         if not res:
-            console.print(f"[red]Item {args.item_id} not found.[/red]")
+            console.print(f"[red]Item {args.item_id} not found or is sold.[/red]")
             return
         drop_tag = " [bold green](PRICE DROP ALERT!)[/bold green]" if res["is_drop_event"] else ""
         console.print(
@@ -401,11 +410,26 @@ def cmd_advance_ladder(args):
         items = repo.list_items()
         count = 0
         for it in items:
+            if it.get("status") == "sold":
+                continue
             repo.advance_item_ladder(it["item_id"])
             count += 1
-        console.print(f"[bold green][OK] Advanced all {count} items to their next ladder stage and cover image.[/bold green]")
+        console.print(f"[bold green][OK] Advanced all {count} active items to their next ladder stage and cover image.[/bold green]")
     else:
         console.print("[red]Please specify --item-id <ID> or --all.[/red]")
+
+def cmd_mark_sold(args):
+    """Manually mark an item as sold across all platforms and protect from restart."""
+    repo = SyncRepository()
+    item = repo.get_item(args.item_id)
+    if not item:
+        console.print(f"[red]Item {args.item_id} not found in database.[/red]")
+        return
+
+    reason = getattr(args, "reason", "manual_cli") or "manual_cli"
+    repo.mark_item_sold(args.item_id, reason=reason)
+    console.print(f"[bold green][OK] Item #{args.item_id} ('{item['title']}') permanently marked as SOLD.[/bold green]")
+    console.print("[dim]Protected from relisting or restarting.[/dim]")
 
 def cmd_clean_drafts(args):
     """Delete all drafts from Blocket cloud account and reset local item statuses."""
@@ -467,12 +491,16 @@ def cmd_sync_sold(args):
     headless = getattr(args, "headless", True)
     results = reconciler.reconcile_all(dry_run=dry_run, headless=headless)
     tradera_count = len(results.get("tradera_sales", []))
+    hidden_count = len(results.get("hidden_sales", []))
     external_count = len(results.get("external_sales", []))
-    total = tradera_count + external_count
+    total = tradera_count + hidden_count + external_count
     if total == 0:
         console.print("[bold green][OK] No new sold items detected on any platform. Everything is in sync![/bold green]")
     else:
-        console.print(f"[bold green][OK] Reconciled {total} item(s) (Tradera: {tradera_count}, External: {external_count})![/bold green]")
+        console.print(
+            f"[bold green][OK] Reconciled {total} item(s) "
+            f"(Tradera Sales: {tradera_count}, Tradera Dolda: {hidden_count}, External: {external_count})![/bold green]"
+        )
 
 def main():
     parser = argparse.ArgumentParser(description="Tradera -> Blocket & Facebook Marketplace Item Trading Bot")
@@ -541,6 +569,11 @@ def main():
     p_floor.add_argument("item_id", help="Item ID")
     p_floor.add_argument("floor", type=int, help="Floor price in SEK (auto-rounded down to 9)")
 
+    # mark-sold
+    p_marksold = subparsers.add_parser("mark-sold", help="Permanently mark an item as sold and prevent relisting")
+    p_marksold.add_argument("item_id", help="Item ID")
+    p_marksold.add_argument("--reason", default="manual_cli", help="Reason for marking as sold")
+
     # ladder
     subparsers.add_parser("ladder", help="View pricing ladder stages and visual rotation status")
 
@@ -586,6 +619,7 @@ def main():
         "clean-drafts": cmd_clean_drafts,
         "set-price": cmd_set_price,
         "set-floor": cmd_set_floor,
+        "mark-sold": cmd_mark_sold,
         "ladder": cmd_ladder,
         "advance-ladder": cmd_advance_ladder,
         "dedupe": cmd_dedupe,

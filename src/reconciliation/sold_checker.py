@@ -226,19 +226,114 @@ class SoldReconciler:
 
         return results
 
+    def reconcile_hidden_items(
+        self,
+        dry_run: bool = False,
+        headless: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Reconciliation for Tradera 'Dolda' (Hidden) listings (https://www.tradera.com/my/listings?tab=hidden):
+        Items hidden on Tradera indicate the seller manually removed/sold them
+        (e.g. sold on Blocket, Facebook Marketplace, or in person).
+
+        For any non-sold item in the local database matching a hidden item:
+          1. Unlists ad from Blocket (if drafted or published).
+          2. Unlists ad from Facebook Marketplace (if drafted or published).
+          3. Permanently marks status='sold' and facebook_status='sold'.
+          4. Guarantees the item will NEVER be restarted or relisted.
+        """
+        print("\nChecking Tradera 'Dolda' (Hidden) listings...", flush=True)
+        hidden_listings = self.tradera_unlister.get_hidden_listings(headless=headless)
+        if not hidden_listings:
+            print("No hidden listings found or session expired.", flush=True)
+            return []
+
+        all_items = self.repo.list_items()
+        non_sold_db = [it for it in all_items if it.get("status") != "sold"]
+        if not non_sold_db:
+            print("No active database items to reconcile against Dolda list.", flush=True)
+            return []
+
+        hidden_ids = {h["item_id"] for h in hidden_listings if h.get("item_id")}
+        matched_items = []
+
+        for it in non_sold_db:
+            item_id = it["item_id"]
+            title = it.get("title", "")
+
+            is_match = False
+            if item_id in hidden_ids:
+                is_match = True
+            else:
+                for h in hidden_listings:
+                    if is_title_match(title, h.get("title", "")):
+                        is_match = True
+                        break
+
+            if is_match:
+                print(f"-> Item #{item_id} ('{title}') recognized in Tradera 'Dolda' list!", flush=True)
+                matched_items.append(it)
+
+        if not matched_items:
+            print("All items in Tradera 'Dolda' list are already recorded as sold.", flush=True)
+            return []
+
+        print(f"\nProcessing {len(matched_items)} manually hidden/sold item(s)...", flush=True)
+        results = []
+
+        if dry_run:
+            print("[DRY-RUN] Would mark the following hidden items as SOLD and unlist cross-platform:")
+            for it in matched_items:
+                print(f"  - #{it['item_id']}: {it['title']} (Blocket: {it.get('status')}, FB: {it.get('facebook_status')})")
+            return matched_items
+
+        for it in matched_items:
+            item_id = it["item_id"]
+            title = it.get("title", "")
+
+            # 1. Unlist from Blocket if active or drafted
+            blocket_unlisted = False
+            if it.get("status") in ("published", "drafted"):
+                print(f"Unlisting #{item_id} from Blocket...", flush=True)
+                blocket_unlisted = self.blocket_unlister.unlist_item(title, headless=headless)
+
+            # 2. Unlist from Facebook Marketplace if active or drafted
+            fb_unlisted = False
+            if it.get("facebook_status") in ("published", "drafted"):
+                print(f"Unlisting #{item_id} from Facebook Marketplace...", flush=True)
+                fb_unlisted = self.facebook_unlister.unlist_item(title, headless=headless)
+
+            # 3. Permanently mark as SOLD in local database (will never be restarted)
+            self.repo.mark_item_sold(item_id, reason="tradera_hidden_list")
+
+            results.append({
+                "item_id": item_id,
+                "title": title,
+                "blocket_unlisted": blocket_unlisted,
+                "facebook_unlisted": fb_unlisted,
+                "source": "tradera_hidden",
+            })
+            print(f"[OK] Item #{item_id} ('{title}') permanently marked as SOLD. Protected from restart.", flush=True)
+
+        return results
+
     def reconcile_all(
         self,
         dry_run: bool = False,
         headless: bool = True
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Bidirectional reconciliation:
-          1. Tradera ➔ Blocket & Facebook
-          2. Blocket & Facebook ➔ Tradera
+        Bidirectional reconciliation across all platforms & Tradera Dolda:
+          1. Tradera ➔ Blocket & Facebook (standard sales)
+          2. Tradera 'Dolda' ➔ Blocket & Facebook (manually hidden/sold items)
+          3. Blocket & Facebook ➔ Tradera (externally sold items)
         """
         tradera_sales = self.reconcile_sold_items(dry_run=dry_run, headless=headless)
+        hidden_sales = self.reconcile_hidden_items(dry_run=dry_run, headless=headless)
         external_sales = self.reconcile_external_sales(dry_run=dry_run, headless=headless)
         return {
             "tradera_sales": tradera_sales,
+            "hidden_sales": hidden_sales,
             "external_sales": external_sales,
         }
+
