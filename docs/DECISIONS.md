@@ -33,3 +33,15 @@
 - **Context**: Blocket is a modern Single Page Application (SPA) with anti-scraping protections. Tradera uses Next.js server-side streaming.
 - **Decision**: Build the application in Python using `requests` and `BeautifulSoup4` for high-speed public Tradera scraping, and `Playwright` for robust Chromium-based Blocket browser automation.
 - **Consequences**: Scrapes Tradera in seconds without browser overhead, while leveraging full browser capabilities with stored cookies for Blocket.
+
+---
+
+## ADR-005: Lightweight Multi-Platform HTTP Profile Diff Listener (`watch`)
+- **Status**: Accepted
+- **Context**: None of the three platforms offer simple consumer webhooks for personal seller accounts. Launching full Playwright browsers on a frequent polling schedule wastes CPU/RAM and increases bot-detection risk.
+- **Decision**: Poll all three platforms via lightweight HTTP requests (`requests` with saved session cookies):
+  - **Tradera**: Public profile HTML (`GET /profile/items/...`) + item page sold markers.
+  - **Blocket**: Authenticated internal JSON summary API (`GET /my-items/api/summary?facet=ACTIVE|DISPOSED|INACTIVE|DRAFT`).
+  - **Facebook Marketplace**: Authenticated SSR Relay JSON extraction on `/marketplace/you/selling`.
+  Playwright browsers are only launched when an actionable diff (new listing or sale) is detected that requires updating the other two platforms.
+- **Consequences**: Full 3-platform diff checks complete in ~2–5 seconds with zero browser overhead until a real change occurs.

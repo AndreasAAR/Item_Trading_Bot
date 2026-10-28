@@ -502,6 +502,54 @@ def cmd_sync_sold(args):
             f"(Tradera Sales: {tradera_count}, Tradera Dolda: {hidden_count}, External: {external_count})![/bold green]"
         )
 
+def cmd_watch(args):
+    """Lightweight HTTP Profile Diff Listener across Tradera, Blocket, and Facebook Marketplace."""
+    from src.reconciliation.watcher import MultiPlatformWatcher
+    watcher = MultiPlatformWatcher()
+    interval = getattr(args, "interval", 180)
+    once = getattr(args, "once", False)
+    auto_draft = not getattr(args, "no_draft", False)
+    target = getattr(args, "target", "all")
+    dry_run = getattr(args, "dry_run", False)
+    headless = getattr(args, "headless", True)
+
+    console.print(Panel(
+        "[bold green]Multi-Platform Profile Diff Listener (Tradera <-> Blocket <-> Facebook)[/bold green]\n"
+        f"• Mode: [bold cyan]{'Single Diff Check (--once)' if once else f'Continuous Listener (every {interval}s)'}[/bold cyan]\n"
+        f"• Auto-Draft New Listings: [bold]{auto_draft}[/bold] (Target: {target.upper()})"
+    ))
+
+    if once:
+        summary = watcher.check_once(
+            auto_draft=auto_draft,
+            target=target,
+            dry_run=dry_run,
+            headless=headless,
+        )
+        browser_needed = summary.get("browser_needed", False)
+        console.print(
+            f"\n[bold green][OK] Diff Check Complete ({summary['timestamp']}):[/bold green] "
+            f"Tradera New: {len(summary['tradera_new'])}, "
+            f"Relisted: {len(summary['tradera_relisted'])}, "
+            f"Tradera Sold: {len(summary['tradera_sold'])}, "
+            f"Blocket Promoted (Live): {len(summary['blocket_promoted'])}, "
+            f"External Sales (Blocket/FB): {len(summary['external_sales'])} | "
+            f"Browser Action Needed: [bold]{browser_needed}[/bold]"
+        )
+        import os
+        gh_out = os.environ.get("GITHUB_OUTPUT")
+        if gh_out:
+            with open(gh_out, "a", encoding="utf-8") as f:
+                f.write(f"browser_needed={'true' if browser_needed else 'false'}\n")
+    else:
+        watcher.watch(
+            interval_seconds=interval,
+            auto_draft=auto_draft,
+            target=target,
+            dry_run=dry_run,
+            headless=headless,
+        )
+
 def main():
     parser = argparse.ArgumentParser(description="Tradera -> Blocket & Facebook Marketplace Item Trading Bot")
     subparsers = parser.add_subparsers(dest="command")
@@ -598,6 +646,15 @@ def main():
     p_sync_sold.add_argument("--dry-run", action="store_true", help="Preview items to unlist without deleting")
     p_sync_sold.add_argument("--headless", action="store_true", default=True, help="Run browser in background")
 
+    # watch (multi-platform HTTP profile diff listener)
+    p_watch = subparsers.add_parser("watch", help="Lightweight HTTP Profile Diff Listener across Tradera, Blocket, and Facebook")
+    p_watch.add_argument("--interval", type=int, default=180, help="Seconds between profile diff checks (default: 180)")
+    p_watch.add_argument("--once", action="store_true", help="Run a single diff check across all platforms and exit")
+    p_watch.add_argument("--no-draft", action="store_true", help="Do not auto-draft newly discovered Tradera listings")
+    p_watch.add_argument("--target", choices=["blocket", "facebook", "all"], default="all", help="Target platforms for auto-drafting new items (default: all)")
+    p_watch.add_argument("--dry-run", action="store_true", help="Preview detected diffs without mutating or launching browsers")
+    p_watch.add_argument("--headless", action="store_true", default=True, help="Run browsers in background when action is needed")
+
     args = parser.parse_args()
 
     # Default to sync if no command provided
@@ -608,6 +665,7 @@ def main():
     commands = {
         "sync": cmd_sync,
         "sync-sold": cmd_sync_sold,
+        "watch": cmd_watch,
         "fetch": cmd_fetch,
         "list": cmd_list,
         "login": cmd_login,

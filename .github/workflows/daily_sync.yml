@@ -5,6 +5,10 @@ on:
     - cron: '0 8 * * *'  # Runs daily at 08:00 UTC (10:00 Swedish time)
   workflow_dispatch:     # Enables manual 1-click execution in GitHub UI
 
+concurrency:
+  group: multi-platform-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     name: Sync Tradera to Blocket & Facebook Marketplace

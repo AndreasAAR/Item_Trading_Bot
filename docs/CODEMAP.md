@@ -4,6 +4,9 @@
 
 ```
 Item_Trading_bot/
+├── .github/workflows/
+│   ├── daily_sync.yml      # Daily full sync workflow (08:00 UTC)
+│   └── profile_listener.yml # 15-min lightweight HTTP profile diff listener workflow
 ├── docs/
 │   ├── ARCHITECTURE.md     # Subsystem designs, state machines, and execution flows
 │   ├── CODEMAP.md          # File directory map and entry points
@@ -40,9 +43,10 @@ Item_Trading_bot/
 │   │   ├── database.py
 │   │   ├── dedupe.py       # Title normalization, fuzzy matching & duplicate clustering
 │   │   └── repository.py   # State machine, relist handling, and CRUD operations
-│   ├── reconciliation/     # Cross-platform sold reconciliation pipeline
+│   ├── reconciliation/     # Cross-platform sold reconciliation & profile diff listener
 │   │   ├── __init__.py
-│   │   └── sold_checker.py # Tradera sold detection & multi-channel unlisting orchestrator
+│   │   ├── sold_checker.py # Tradera/Blocket/FB sold detection & multi-channel unlisting orchestrator
+│   │   └── watcher.py      # Lightweight HTTP Profile Diff Listener across all 3 platforms
 │   ├── mapper/             # Data transformation & copy formatting
 │   │   ├── __init__.py
 │   │   ├── category_mapper.py    # Blocket 3-level category & attribute mapper
@@ -80,12 +84,13 @@ Item_Trading_bot/
 
 | Module | Key Class / Function | Responsibility |
 |---|---|---|
-| `src.cli.main` | `main()` | CLI dispatcher (`sync`, `sync-sold`, `dedupe`, `fetch`, `list`, `login`, `fb-login`, `draft`, `publish`, `fb-draft`) |
+| `src.cli.main` | `main()` | CLI dispatcher (`sync`, `sync-sold`, `watch`, `dedupe`, `fetch`, `list`, `login`, `fb-login`, `draft`, `publish`, `fb-draft`) |
 | `src.tradera.client` | `TraderaClient.get_profile_items()`, `get_item_detail()` | Fetches HTML from public Tradera seller page and individual listings |
 | `src.tradera.parser` | `TraderaParser.parse_profile_page()`, `parse_item_page()` | Converts raw HTML into structured `TraderaItemCard` and `TraderaItemDetail` models |
 | `src.storage.repository` | `SyncRepository` | Idempotent state storage, relist recognition, duplicate merging, and sync log tracking |
 | `src.storage.dedupe` | `find_matching_existing_item()`, `find_all_duplicates()` | Normalized title, fuzzy similarity (>90%), and image signature clustering |
-| `src.reconciliation.sold_checker` | `SoldReconciler.reconcile_sold_items()` | Detects sold items on Tradera and coordinates removal from Blocket and Facebook |
+| `src.reconciliation.sold_checker` | `SoldReconciler.reconcile_all()` | Detects sold/hidden items across Tradera, Blocket, and Facebook and coordinates unlisting |
+| `src.reconciliation.watcher` | `MultiPlatformWatcher.check_once()`, `watch()` | Lightweight HTTP profile diff listener across Tradera, Blocket, and Facebook Marketplace |
 | `src.mapper.category_mapper` | `guess_blocket_category()`, `map_condition()` | 3-level Blocket category, condition, and color mapping |
 | `src.mapper.fb_category_mapper`| `guess_fb_category()`, `map_fb_condition()` | Facebook category, condition, and copy formatting |
 | `src.mapper.formatter` | `format_blocket_payload()` | Formats titles, descriptions, and resolves pricing |

@@ -156,31 +156,47 @@ class SoldReconciler:
         headless: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Reverse reconciliation workflow (Blocket & Facebook ➔ Tradera):
-          1. Scans Blocket 'Avslutade' tab for items marked as 'Såld'.
-          2. Matches against non-sold database inventory.
-          3. For any item found sold on Blocket that is still active on Tradera:
+        Reverse reconciliation workflow (Blocket & Facebook ➔ Other two platforms):
+          1. Scans Blocket 'Avslutade' (DISPOSED) via fast HTTP API (or Playwright fallback) for items marked as 'Såld'.
+          2. Scans Facebook Marketplace selling dashboard for items marked as 'Såld'/'Sold'.
+          3. Matches against non-sold database inventory.
+          4. For any externally sold item:
              - Ends the listing early on Tradera.
-             - Unlists the ad on Facebook Marketplace.
-             - Updates local DB status to 'sold'.
+             - Unlists from the other secondary platform (Blocket or Facebook).
+             - Permanently marks local DB status='sold' and facebook_status='sold'.
         """
-        print("\nChecking for items sold on Blocket (Avslutade tab)...", flush=True)
+        print("\nChecking for items sold on Blocket (Avslutade)...", flush=True)
         blocket_sold_titles = self.blocket_unlister.get_ended_sold_titles(headless=headless)
-        print(f"Found {len(blocket_sold_titles)} sold item(s) in Blocket Avslutade tab.", flush=True)
+        print(f"Found {len(blocket_sold_titles)} sold item(s) in Blocket Avslutade.", flush=True)
 
-        if not blocket_sold_titles:
+        print("Checking for items sold on Facebook Marketplace...", flush=True)
+        fb_sold_titles = self.facebook_unlister.get_ended_sold_titles(headless=headless, allow_browser_fallback=False)
+        print(f"Found {len(fb_sold_titles)} sold item(s) on Facebook Marketplace.", flush=True)
+
+        if not blocket_sold_titles and not fb_sold_titles:
             return []
 
         # Find non-sold items in DB
         all_items = self.repo.list_items()
         non_sold_db = [it for it in all_items if it.get("status") != "sold"]
 
-        matched_sales = []
+        matched_sales: List[Dict[str, Any]] = []
+        seen_ids = set()
+
         for b_title in blocket_sold_titles:
             for it in non_sold_db:
-                if is_title_match(it["title"], b_title):
+                if it["item_id"] not in seen_ids and is_title_match(it["title"], b_title):
                     print(f"-> Item #{it['item_id']} ('{it['title']}') was marked as SOLD on Blocket!", flush=True)
-                    matched_sales.append(it)
+                    matched_sales.append({"item": it, "source": "blocket"})
+                    seen_ids.add(it["item_id"])
+                    break
+
+        for fb_title in fb_sold_titles:
+            for it in non_sold_db:
+                if it["item_id"] not in seen_ids and is_title_match(it["title"], fb_title):
+                    print(f"-> Item #{it['item_id']} ('{it['title']}') was marked as SOLD on Facebook Marketplace!", flush=True)
+                    matched_sales.append({"item": it, "source": "facebook"})
+                    seen_ids.add(it["item_id"])
                     break
 
         if not matched_sales:
@@ -191,38 +207,49 @@ class SoldReconciler:
         results = []
 
         if dry_run:
-            print("[DRY-RUN] Would end the following listings on Tradera & Facebook:")
-            for it in matched_sales:
-                print(f"  - #{it['item_id']}: {it['title']} (URL: {it.get('url')})")
-            return matched_sales
+            print("[DRY-RUN] Would end the following listings on the remaining two platforms:")
+            for entry in matched_sales:
+                it = entry["item"]
+                print(f"  - #{it['item_id']}: {it['title']} (Sold on: {entry['source']}, URL: {it.get('url')})")
+            return [entry["item"] for entry in matched_sales]
 
-        # 1. Unlist from Tradera
-        print("\n--- Ending Listings on Tradera ---", flush=True)
-        for it in matched_sales:
+        for entry in matched_sales:
+            it = entry["item"]
+            source = entry["source"]
             item_id = it["item_id"]
+            title = it["title"]
             url = it.get("url") or f"https://www.tradera.com/item/0/{item_id}/item"
+
+            # 1. Always end listing early on Tradera
+            print(f"\n--- Ending Listing #{item_id} on Tradera (sold on {source}) ---", flush=True)
             t_ended = self.tradera_unlister.end_listing(
                 item_url=url,
                 item_id=item_id,
-                title=it.get("title"),
+                title=title,
                 headless=headless
             )
 
-            # 2. Unlist from Facebook Marketplace
-            fb_ended = self.facebook_unlister.unlist_item(it["title"], headless=headless)
+            # 2. Unlist from the other secondary marketplace
+            blocket_deleted = False
+            fb_deleted = False
+            if source == "blocket":
+                fb_deleted = self.facebook_unlister.unlist_item(title, headless=headless)
+            elif source == "facebook":
+                b_res = self.blocket_unlister.unlist_item(title, headless=headless)
+                blocket_deleted = b_res.get("removed", False)
 
-            # 3. Update database status
-            self.repo.update_status(item_id, "sold")
-            self.repo.update_facebook_status(item_id, "sold")
+            # 3. Permanently mark sold in database across all platforms
+            self.repo.mark_item_sold(item_id, reason=f"sold_on_{source}")
 
             results.append({
                 "item_id": item_id,
-                "title": it["title"],
+                "title": title,
                 "tradera_ended": t_ended,
-                "facebook_deleted": fb_ended,
-                "source": "blocket",
+                "blocket_deleted": blocket_deleted,
+                "facebook_deleted": fb_deleted,
+                "source": source,
             })
-            print(f"Reconciled external sale for item #{item_id} ('{it['title']}') -> status='sold'.", flush=True)
+            print(f"Reconciled external sale ({source}) for item #{item_id} ('{title}') -> status='sold'.", flush=True)
 
         return results
 

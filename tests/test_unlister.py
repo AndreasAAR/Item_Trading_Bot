@@ -24,6 +24,10 @@ class TestTitleMatching:
     def test_minor_punctuation_differences(self):
         assert is_title_match("Nike Pegasus Trail 5 Gore-Tex - svarta 43", "Nike Pegasus Trail 5 Gore-Tex, svarta, 43")
 
+    def test_distinct_same_brand_titles_do_not_false_match(self):
+        assert not is_title_match("Massimo Dutti navy trenchcoat, storlek M", "Massimo Dutti navy kofta, storlek M")
+        assert not is_title_match("UNIQLO vit skjorta, storlek M", "Uniqlo ljusblå skjorta, storlek M")
+
 
 class TestSoldReconciler:
     def test_is_item_sold_positive_cases(self):
@@ -109,6 +113,7 @@ class TestSoldReconciler:
 
         # Blocket Avslutade tab reports an item sold
         mock_blocket.get_ended_sold_titles.return_value = ["COS svart kofta, storlek M"]
+        mock_fb.get_ended_sold_titles.return_value = []
 
         # Local DB has item 300 active
         mock_repo.list_items.return_value = [
@@ -130,10 +135,103 @@ class TestSoldReconciler:
         assert results[0]["item_id"] == "300"
         assert results[0]["tradera_ended"] is True
         assert results[0]["facebook_deleted"] is True
+        assert results[0]["source"] == "blocket"
 
         mock_tradera_unlister.end_listing.assert_called_once()
-        mock_repo.update_status.assert_called_once_with("300", "sold")
-        mock_repo.update_facebook_status.assert_called_once_with("300", "sold")
+        mock_repo.mark_item_sold.assert_called_once_with("300", reason="sold_on_blocket")
+
+    def test_reconcile_external_sales_facebook_to_tradera_and_blocket(self):
+        mock_repo = MagicMock()
+        mock_tradera_client = MagicMock()
+        mock_tradera_unlister = MagicMock()
+        mock_blocket = MagicMock()
+        mock_fb = MagicMock()
+
+        mock_blocket.get_ended_sold_titles.return_value = []
+        mock_fb.get_ended_sold_titles.return_value = ["IKEA HOPPVALS rullgardin 120x155 cm"]
+
+        mock_repo.list_items.return_value = [
+            {"item_id": "400", "title": "IKEA HOPPVALS rullgardin 120x155 cm", "status": "published", "facebook_status": "published", "url": "http://tradera/400"},
+        ]
+        mock_tradera_unlister.end_listing.return_value = True
+        mock_blocket.unlist_item.return_value = {"deleted_aktiva": True, "deleted_utkast": False, "removed": True}
+
+        reconciler = SoldReconciler(
+            repository=mock_repo,
+            tradera_client=mock_tradera_client,
+            tradera_unlister=mock_tradera_unlister,
+            blocket_unlister=mock_blocket,
+            facebook_unlister=mock_fb
+        )
+
+        results = reconciler.reconcile_external_sales(dry_run=False)
+        assert len(results) == 1
+        assert results[0]["item_id"] == "400"
+        assert results[0]["tradera_ended"] is True
+        assert results[0]["blocket_deleted"] is True
+        assert results[0]["source"] == "facebook"
+
+        mock_tradera_unlister.end_listing.assert_called_once()
+        mock_blocket.unlist_item.assert_called_once_with("IKEA HOPPVALS rullgardin 120x155 cm", headless=True)
+        mock_repo.mark_item_sold.assert_called_once_with("400", reason="sold_on_facebook")
+
+    def test_multi_platform_watcher_check_once(self):
+        from src.reconciliation.watcher import MultiPlatformWatcher
+
+        mock_repo = MagicMock()
+        mock_tradera_client = MagicMock()
+        mock_tradera_unlister = MagicMock()
+        mock_blocket = MagicMock()
+        mock_fb = MagicMock()
+        mock_reconciler = MagicMock()
+
+        # Tradera profile currently has item 101 (existing)
+        card101 = MagicMock()
+        card101.item_id = "101"
+        mock_tradera_client.get_profile_items.return_value = [card101]
+
+        # Local DB has item 101 in 'drafted' status and item 102 that disappeared & sold on Tradera
+        mock_repo.list_items.side_effect = lambda status=None, platform="blocket": (
+            [{"item_id": "101", "title": "Haglöfs grön väst, storlek M", "status": "drafted"}]
+            if status == "drafted"
+            else [
+                {"item_id": "101", "title": "Haglöfs grön väst, storlek M", "status": "drafted", "url": "http://tradera/101"},
+                {"item_id": "102", "title": "Ukulele", "status": "published", "url": "http://tradera/102"},
+            ]
+        )
+
+        # Item 102 is confirmed sold on Tradera
+        mock_reconciler.is_item_sold_on_tradera.return_value = True
+        mock_blocket.unlist_items.return_value = {"Ukulele": {"removed": True}}
+        mock_fb.unlist_items.return_value = {"Ukulele": True}
+
+        # Blocket active summaries show item 101 is now LIVE on Blocket!
+        mock_blocket.get_active_summaries.return_value = [
+            {"id": "27637426", "title": "Haglöfs grön väst, storlek M", "url": "https://www.blocket.se/recommerce/forsale/item/27637426"}
+        ]
+        mock_reconciler.reconcile_external_sales.return_value = []
+
+        watcher = MultiPlatformWatcher(
+            repository=mock_repo,
+            tradera_client=mock_tradera_client,
+            tradera_unlister=mock_tradera_unlister,
+            blocket_unlister=mock_blocket,
+            facebook_unlister=mock_fb,
+            reconciler=mock_reconciler,
+        )
+
+        summary = watcher.check_once(auto_draft=False, dry_run=False)
+        assert len(summary["tradera_sold"]) == 1
+        assert summary["tradera_sold"][0]["item_id"] == "102"
+        assert len(summary["blocket_promoted"]) == 1
+        assert summary["blocket_promoted"][0]["item_id"] == "101"
+        mock_repo.update_status.assert_called_once_with(
+            "101",
+            "published",
+            blocket_ad_id="27637426",
+            blocket_ad_url="https://www.blocket.se/recommerce/forsale/item/27637426",
+        )
+        mock_repo.mark_item_sold.assert_called_once_with("102", reason="sold_on_tradera")
 
     def test_tradera_unlister_notice_without_session(self):
         from src.tradera.unlister import TraderaUnlister

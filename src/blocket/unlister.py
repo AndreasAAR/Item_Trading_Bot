@@ -1,30 +1,40 @@
 import time
 import re
+import json
+import requests
 from difflib import SequenceMatcher
 from typing import Optional, List, Dict, Any
 from playwright.sync_api import sync_playwright, Page, BrowserContext
 
+from config.settings import USER_AGENT
 from src.blocket.session import BlocketSessionManager
 from src.storage.dedupe import normalize_title
 
 
-def is_title_match(target_title: str, candidate_title: str, threshold: float = 0.82) -> bool:
+def is_title_match(target_title: str, candidate_title: str, threshold: float = 0.90) -> bool:
     """
     Checks if a target title matches a candidate title from Blocket,
     taking into account Blocket's truncation (ending in '...') and normalization.
     """
-    t_clean = normalize_title(target_title)
+    is_truncated = candidate_title.strip().endswith("..") or target_title.strip().endswith("..")
+    t_clean = normalize_title(target_title.rstrip(".").strip())
     c_clean = normalize_title(candidate_title.rstrip(".").strip())
 
-    # Exact or prefix match
+    if not t_clean or not c_clean:
+        return False
+
+    # Exact match after normalization
     if t_clean == c_clean:
         return True
-    if len(c_clean) >= 12 and t_clean.startswith(c_clean):
-        return True
-    if len(t_clean) >= 12 and c_clean.startswith(t_clean):
-        return True
 
-    # Fuzzy match
+    # Prefix match for truncated Blocket titles (e.g. ending in '...')
+    if is_truncated:
+        if len(c_clean) >= 12 and t_clean.startswith(c_clean):
+            return True
+        if len(t_clean) >= 12 and c_clean.startswith(t_clean):
+            return True
+
+    # High-confidence fuzzy match
     ratio = SequenceMatcher(None, t_clean, c_clean).ratio()
     return ratio >= threshold
 
@@ -185,11 +195,85 @@ class BlocketUnlister:
         res = self.unlist_items([title], headless=headless)
         return res.get(title, {"deleted_aktiva": False, "deleted_utkast": False, "removed": False})
 
+    def fetch_my_items_summary(self, facet: str = "ACTIVE", limit: int = 100) -> Optional[List[Dict[str, Any]]]:
+        """
+        Lightweight HTTP check (~200ms, no browser) against Blocket's internal summary API
+        using saved session cookies from data/blocket_auth_state.json.
+        Supported facets: 'ACTIVE', 'DISPOSED' (Avslutade/Såld), 'INACTIVE' (Dolda), 'DRAFT' (Utkast).
+        Returns list of summary dicts, or None if session is missing/expired.
+        """
+        state_path = self.session_manager.state_path
+        if not state_path.exists():
+            return None
+
+        try:
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+            cookies = data.get("cookies", [])
+            if not cookies:
+                return None
+
+            s = requests.Session()
+            s.headers.update({
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+                "Accept-Language": "sv-SE,sv;q=0.9",
+            })
+            for c in cookies:
+                s.cookies.set(c["name"], c["value"], domain=c.get("domain", "").lstrip("."))
+
+            url = f"https://www.blocket.se/my-items/api/summary?limit={limit}&offset=0"
+            if facet:
+                url += f"&facet={facet}"
+
+            resp = s.get(url, timeout=15)
+            if resp.status_code != 200:
+                return None
+
+            payload = resp.json()
+            return payload.get("summaries", [])
+        except Exception as e:
+            print(f"Notice: HTTP summary check for Blocket facet={facet} failed ({e}).", flush=True)
+            return None
+
+    def get_active_summaries(self) -> List[Dict[str, Any]]:
+        """
+        Returns a list of active Blocket ads [{'id': str, 'title': str, 'url': str}] via fast HTTP API.
+        """
+        summaries = self.fetch_my_items_summary(facet="ACTIVE")
+        if summaries is None:
+            return []
+
+        active = []
+        for item in summaries:
+            ad_id = str(item.get("id", ""))
+            title = (item.get("data") or {}).get("title", "").strip()
+            if ad_id and title:
+                active.append({
+                    "id": ad_id,
+                    "title": title,
+                    "url": f"https://www.blocket.se/recommerce/forsale/item/{ad_id}",
+                })
+        return active
+
     def get_ended_sold_titles(self, headless: bool = True) -> List[str]:
         """
-        Navigates to Blocket 'Avslutade' tab and returns titles of ads marked as 'Såld'.
+        Returns titles of ads marked as 'Såld' under Blocket 'Avslutade' (DISPOSED).
+        Uses the fast HTTP JSON API first (~200ms), falling back to Playwright if needed.
         """
-        sold_titles: List[str] = []
+        # 1. Fast HTTP JSON check (no browser launch required)
+        disposed = self.fetch_my_items_summary(facet="DISPOSED")
+        if disposed is not None:
+            sold_titles: List[str] = []
+            for item in disposed:
+                state_label = (item.get("state") or {}).get("label", "")
+                state_type = (item.get("state") or {}).get("type", "")
+                title = (item.get("data") or {}).get("title", "").strip()
+                if title and (state_type == "DISPOSED" or "såld" in state_label.lower() or "sald" in state_label.lower()):
+                    sold_titles.append(title)
+            return sold_titles
+
+        # 2. Fallback to Playwright DOM inspection
+        sold_titles = []
         try:
             with sync_playwright() as p:
                 context = self.session_manager.get_context(p, headless=headless)

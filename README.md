@@ -110,9 +110,13 @@ python -m src.cli sync --target facebook
 # Inspect all tracked items and multi-platform sync status
 python -m src.cli list
 
-# Detect sold items on Tradera and unlist from Blocket & Facebook
+# Detect sold items across Tradera, Blocket & Facebook and unlist cross-platform
 python -m src.cli sync-sold
 python -m src.cli sync-sold --dry-run
+
+# Run the lightweight HTTP Profile Diff Listener across all 3 platforms
+python -m src.cli watch --interval 180
+python -m src.cli watch --once --dry-run
 
 # Scan and merge duplicate or relisted items
 python -m src.cli dedupe
@@ -142,11 +146,12 @@ powershell -ExecutionPolicy Bypass -File scripts\setup_windows_task.ps1
 Start-ScheduledTask -TaskName 'TraderaMultiPlatformSync'
 ```
 
-### Option 2: GitHub Actions (Cloud Automation)
-Runs on a daily schedule (`08:00 UTC`) via `.github/workflows/daily_sync.yml`:
-1. Add `BLOCKET_AUTH_STATE` to your GitHub Repository Secrets.
-2. Add `FB_AUTH_STATE` to your GitHub Repository Secrets.
-3. The workflow runs headlessly and commits database updates back to the repo.
+### Option 2: GitHub Actions (Cloud Automation & 15-Min Profile Diff Listener)
+- **Every 15 Minutes (`.github/workflows/profile_listener.yml`)**: Runs a ~4-second HTTP pre-check (`python -m src.cli watch --once --dry-run`) across Tradera, Blocket, and Facebook Marketplace. It **skips** downloading/launching Playwright Chromium unless an item was actually added or sold, keeping runs fast (~12s) and lightweight.
+- **Daily Full Sync (`.github/workflows/daily_sync.yml`)**: Runs at `08:00 UTC`.
+- **Setup**:
+  1. Add `BLOCKET_AUTH_STATE`, `FB_AUTH_STATE`, and `TRADERA_AUTH_STATE` to your GitHub Repository Secrets.
+  2. Both workflows commit database updates (`data/sync_store.db`) back to the repository automatically.
 
 ---
 

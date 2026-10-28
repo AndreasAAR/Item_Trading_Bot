@@ -49,12 +49,13 @@ flowchart TD
   - `dedupe.py`: Title normalization, fuzzy similarity ratio (>90%), image signature hash sets, and duplicate clustering.
   - `repository.py`: CRUD methods, relist recognition (`upsert_item_detailed`), duplicate cluster merging (`merge_duplicate_items`), and status transitions (`discovered` -> `drafted` -> `published` -> `sold`).
 
-### 2.3 Cross-Platform Sold Reconciliation (`src/reconciliation/` & `unlister`)
-- **Responsibility**: Detects when an item is sold on one platform and automatically cleans up corresponding listings/drafts across the other channels.
+### 2.3 Cross-Platform Sold Reconciliation & Profile Diff Listener (`src/reconciliation/` & `unlister`)
+- **Responsibility**: Detects when an item is listed, published, or sold on any of the three platforms and automatically synchronizes or unlists across the remaining two channels.
 - **Key Components**:
-  - `src/reconciliation/sold_checker.py` (`SoldReconciler`): Compares inventory against the active seller profile, checks missing listings for positive sold markers (`såld med köp nu`, `vann auktionen`, `slutpris`), and orchestrates multi-platform unlisting.
-  - `src/blocket/unlister.py` (`BlocketUnlister`): Scans both the **`Aktiva`** tab (live published listings) and the **`Utkast`** tab (saved drafts). Deletes sold items via the card's 3-dots action menu (`...` -> `Ta bort` -> confirm `<w-modal>`), avoiding the broken "Markera som såld" flow when no chat thread exists.
-  - `src/facebook/unlister.py` (`FacebookUnlister`): Navigates to `/marketplace/you/selling`, finds the card, opens `...`, clicks `Ta bort annons`, chooses "Sold elsewhere" (*Sålde någon annanstans*), and confirms.
+  - `src/reconciliation/watcher.py` (`MultiPlatformWatcher`): Lightweight HTTP profile diff listener (`python -m src.cli watch`) that polls Tradera's public profile HTML, Blocket's authenticated JSON summary API (`/my-items/api/summary`), and Facebook Marketplace's selling dashboard SSR JSON in ~200–500ms without opening a browser—only launching Playwright when an actionable diff (new listing or sale) requires cross-platform mutation.
+  - `src/reconciliation/sold_checker.py` (`SoldReconciler`): Compares inventory against the active seller profile, checks missing listings for positive sold markers (`såld med köp nu`, `vann auktionen`, `slutpris`), checks Tradera `Dolda` (`?tab=hidden`), and orchestrates bidirectional unlisting across Tradera, Blocket, and Facebook.
+  - `src/blocket/unlister.py` (`BlocketUnlister`): Queries Blocket's internal JSON summary API (`facet=ACTIVE`, `DISPOSED`, `INACTIVE`, `DRAFT`) via `requests` using saved session cookies (`fetch_my_items_summary`), and deletes sold items from both **`Aktiva`** and **`Utkast`** via the card's 3-dots action menu (`...` -> `Ta bort` -> confirm `<w-modal>`).
+  - `src/facebook/unlister.py` (`FacebookUnlister`): Extracts active and sold listing snapshots (`get_selling_snapshot`) from `/marketplace/you/selling` and unlists sold items (`...` -> `Ta bort annons` -> *Sålde någon annanstans*).
 
 ### 2.4 Taxonomy Mapper & Image Processor (`src/mapper/`)
 - **Responsibility**: Transforms raw Tradera item schemas into marketplace-specific listing structures.
